@@ -1,11 +1,20 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CreateOfferScreen — fully integrated with StoreApiService.createOffer()
+// CreateOfferScreen — Full Razorpay paid flow
+//
+// Flow:
+//   1. User fills title, description, days, banner
+//   2. Tap "Preview & Pay" → calls purchaseOffer() → Razorpay order created
+//   3. Razorpay payment sheet opens
+//   4. On payment success → calls verifyOfferPurchase() → offer created
+//   5. Navigate back with success
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CreateOfferScreen extends StatefulWidget {
@@ -19,20 +28,90 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   // ── Controllers ───────────────────────────────────────────────────────────
   final _titleController = TextEditingController();
   final _descController = TextEditingController();
+  final _daysController = TextEditingController();
 
-  // ── Form state ────────────────────────────────────────────────────────────
-  String _selectedOfferType = 'normal'; // "normal" | "popup"
-  DateTime? _expiryDate;
+  // ── State ─────────────────────────────────────────────────────────────────
   File? _bannerFile;
   bool _submitting = false;
 
+  // Razorpay
+  late Razorpay _razorpay;
+
+  // Cached from step 1 — needed for step 2
+  RazorpayOfferOrderModel? _pendingOrder;
+
   final _picker = ImagePicker();
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descController.dispose();
+    _daysController.dispose();
+    _razorpay.clear();
     super.dispose();
+  }
+
+  // ── Razorpay callbacks ────────────────────────────────────────────────────
+
+  void _onPaymentSuccess(PaymentSuccessResponse response) async {
+    if (_pendingOrder == null) return;
+
+    setState(() => _submitting = true);
+
+    try {
+      final offer = await StoreApiService.verifyOfferPurchase(
+        razorpayOrderId: response.orderId ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+        title: _pendingOrder!.offerTitle,
+        description: _pendingOrder!.offerDescription,
+        days: _pendingOrder!.days,
+        banner: _pendingOrder!.banner,
+      );
+
+      if (!mounted) return;
+      _showSnack('Offer "${offer.title}" activated! 🎉');
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) Navigator.of(context).pop(true);
+    } on ApiException catch (e) {
+      if (mounted) _showSnack(e.message, isError: true);
+    } catch (_) {
+      if (mounted)
+        _showSnack('Verification failed. Contact support.', isError: true);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    setState(() => _submitting = false);
+    _pendingOrder = null;
+    _showSnack(
+      response.message?.isNotEmpty == true
+          ? response.message!
+          : 'Payment cancelled',
+      isError: true,
+    );
+  }
+
+  void _onExternalWallet(ExternalWalletResponse response) {
+    setState(() => _submitting = false);
+    _pendingOrder = null;
+    _showSnack(
+      'External wallet selected: ${response.walletName}',
+      isError: true,
+    );
   }
 
   // ── Image picker ──────────────────────────────────────────────────────────
@@ -103,77 +182,169 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       maxWidth: 1200,
     );
 
-    if (picked != null) {
-      setState(() => _bannerFile = File(picked.path));
-    }
+    if (picked != null) setState(() => _bannerFile = File(picked.path));
   }
 
-  // ── Date picker ───────────────────────────────────────────────────────────
+  // ── Preview & Pay ─────────────────────────────────────────────────────────
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 7)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2100),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: Color(0xFFEC4899),
-            onPrimary: Colors.white,
-            onSurface: Color(0xFF1a1a1a),
-          ),
-        ),
-        child: child!,
-      ),
-    );
-
-    if (picked != null) setState(() => _expiryDate = picked);
-  }
-
-  // ── Submit ────────────────────────────────────────────────────────────────
-
-  Future<void> _submit() async {
+  Future<void> _previewAndPay() async {
     final title = _titleController.text.trim();
     final desc = _descController.text.trim();
+    final daysText = _daysController.text.trim();
 
     // Validation
     if (title.isEmpty) {
       _showSnack('Please enter offer title', isError: true);
       return;
     }
+    if (daysText.isEmpty) {
+      _showSnack('Please enter number of days', isError: true);
+      return;
+    }
+    final days = int.tryParse(daysText);
+    if (days == null || days <= 0) {
+      _showSnack('Days must be a valid number greater than 0', isError: true);
+      return;
+    }
 
     setState(() => _submitting = true);
 
     try {
-      final offer = await StoreApiService.createOffer(
+      // Step 1: Create order
+      final order = await StoreApiService.purchaseOffer(
         title: title,
-        description: desc.isNotEmpty ? desc : null,
-        offerType: _selectedOfferType,
-        expiryDate: _expiryDate,
+        description: desc,
+        days: days,
         bannerImage: _bannerFile,
       );
 
-      if (!mounted) return;
+      _pendingOrder = order;
 
-      _showSnack('Offer "${offer.title}" created successfully!');
+      // Show price confirmation before opening Razorpay
+      final confirmed = await _showPriceConfirmDialog(order);
+      if (!mounted || confirmed != true) {
+        setState(() => _submitting = false);
+        _pendingOrder = null;
+        return;
+      }
 
-      // Short delay then pop back
-      await Future.delayed(const Duration(milliseconds: 800));
-      if (mounted) Navigator.of(context).pop(true); // true = refresh parent
+      // Step 2: Open Razorpay
+      final options = {
+        'key': 'YOUR_RAZORPAY_KEY_ID', // 🔥 replace with your key
+        'order_id': order.orderId,
+        'amount': order.amountPaise,
+        'currency': order.currency,
+        'name': 'Offer Activation',
+        'description': '${order.days} day offer: ${order.offerTitle}',
+        'prefill': {'contact': '', 'email': ''},
+        'theme': {'color': '#EC4899'},
+      };
+
+      _razorpay.open(options);
     } on ApiException catch (e) {
       if (mounted) _showSnack(e.message, isError: true);
+      setState(() => _submitting = false);
     } catch (_) {
       if (mounted)
         _showSnack('Something went wrong. Please try again.', isError: true);
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+      setState(() => _submitting = false);
     }
+  }
+
+  // ── Price confirmation dialog ─────────────────────────────────────────────
+
+  Future<bool?> _showPriceConfirmDialog(RazorpayOfferOrderModel order) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Confirm Payment',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1a1a1a),
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _confirmRow('Offer Title', order.offerTitle),
+            const SizedBox(height: 10),
+            _confirmRow(
+              'Duration',
+              '${order.days} day${order.days > 1 ? 's' : ''}',
+            ),
+            const SizedBox(height: 10),
+            _confirmRow('Price per day', order.formattedPerDay),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Total',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
+                Text(
+                  order.formattedTotalPrice,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 20,
+                    color: Color(0xFFEC4899),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF999999)),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEC4899),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Pay Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _confirmRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF666666), fontSize: 14),
+        ),
+        Text(
+          value,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        ),
+      ],
+    );
   }
 
   // ── Snackbar ──────────────────────────────────────────────────────────────
 
   void _showSnack(String msg, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -186,14 +357,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
   }
 
-  // ── Formatted expiry ──────────────────────────────────────────────────────
-
-  String get _expiryLabel {
-    if (_expiryDate == null) return 'dd-mm-yyyy';
-    return '${_expiryDate!.day.toString().padLeft(2, '0')}-'
-        '${_expiryDate!.month.toString().padLeft(2, '0')}-'
-        '${_expiryDate!.year}';
-  }
+  // ── Computed total price preview ──────────────────────────────────────────
+  // Note: This is a local estimate only. Actual price comes from backend.
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -211,7 +376,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                 child: IntrinsicHeight(
                   child: Column(
                     children: [
-                      // ── Top bar ─────────────────────────────────────
+                      // ── Top bar ───────────────────────────────────
                       Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 20,
@@ -245,7 +410,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                         ),
                       ),
 
-                      // ── Scrollable content ──────────────────────────
+                      // ── Content ───────────────────────────────────
                       Expanded(
                         child: SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -254,7 +419,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                             children: [
                               const SizedBox(height: 8),
 
-                              // ── Banner ─────────────────────────────
+                              // ── Banner ──────────────────────────
                               _buildCard(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,7 +459,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                                       _bannerFile!,
                                                       fit: BoxFit.cover,
                                                     ),
-                                                    // Edit overlay
                                                     Positioned(
                                                       bottom: 8,
                                                       right: 8,
@@ -391,7 +555,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
                               const SizedBox(height: 16),
 
-                              // ── Title ──────────────────────────────
+                              // ── Title ────────────────────────────
                               _buildCard(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,35 +569,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 14),
-                                    TextField(
+                                    _buildTextField(
                                       controller: _titleController,
-                                      textCapitalization:
+                                      hint:
+                                          'e.g., 50% Off on Summer Collection',
+                                      capitalization:
                                           TextCapitalization.sentences,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        color: Color(0xFF1a1a1a),
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText:
-                                            'e.g., 50% Off on Summer Collection',
-                                        hintStyle: const TextStyle(
-                                          color: Color(0xFFBBBBBB),
-                                          fontSize: 14,
-                                        ),
-                                        filled: true,
-                                        fillColor: const Color(0xFFFDF0F4),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 14,
-                                            ),
-                                      ),
                                     ),
                                   ],
                                 ),
@@ -441,7 +582,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
                               const SizedBox(height: 16),
 
-                              // ── Description ────────────────────────
+                              // ── Description ──────────────────────
                               _buildCard(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -455,33 +596,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 14),
-                                    TextField(
+                                    _buildTextField(
                                       controller: _descController,
+                                      hint: 'Describe your offer...',
                                       maxLines: 4,
-                                      textCapitalization:
+                                      capitalization:
                                           TextCapitalization.sentences,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        color: Color(0xFF1a1a1a),
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'Describe your offer...',
-                                        hintStyle: const TextStyle(
-                                          color: Color(0xFFBBBBBB),
-                                          fontSize: 14,
-                                        ),
-                                        filled: true,
-                                        fillColor: const Color(0xFFFDF0F4),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding: const EdgeInsets.all(
-                                          16,
-                                        ),
-                                      ),
                                     ),
                                   ],
                                 ),
@@ -489,120 +609,85 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
                               const SizedBox(height: 16),
 
-                              // ── Offer Type ─────────────────────────
+                              // ── Days ─────────────────────────────
                               _buildCard(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Text(
-                                      'Offer Type',
+                                      'Number of Days *',
                                       style: TextStyle(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
                                         color: Color(0xFF1a1a1a),
                                       ),
                                     ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Offer will be visible to users for this many days',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF999999),
+                                      ),
+                                    ),
                                     const SizedBox(height: 14),
-                                    Row(
-                                      children: [
-                                        // Normal
-                                        Expanded(
-                                          child: _offerTypeOption(
-                                            label: 'Normal',
-                                            value: 'normal',
-                                            icon: Icons.image_outlined,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        // Popup
-                                        Expanded(
-                                          child: _offerTypeOption(
-                                            label: 'Popup',
-                                            value: 'popup',
-                                            icon: Icons
-                                                .notification_important_outlined,
-                                            isPremium: true,
-                                          ),
-                                        ),
+                                    _buildTextField(
+                                      controller: _daysController,
+                                      hint: 'e.g., 7',
+                                      keyboardType: TextInputType.number,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
                                       ],
-                                    ),
-                                    if (_selectedOfferType == 'popup') ...[
-                                      const SizedBox(height: 12),
-                                      const Text(
-                                        'Popup offers get highlighted visibility to all users',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Color(0xFF999999),
-                                          fontWeight: FontWeight.w400,
-                                        ),
+                                      prefixIcon: const Icon(
+                                        Icons.calendar_today_outlined,
+                                        color: Color(0xFFEC4899),
+                                        size: 20,
                                       ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-
-                              const SizedBox(height: 16),
-
-                              // ── Expiry Date ────────────────────────
-                              _buildCard(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Expiry Date',
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF1a1a1a),
-                                      ),
+                                      suffixText: 'days',
                                     ),
-                                    const SizedBox(height: 14),
-                                    GestureDetector(
-                                      onTap: _pickDate,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 14,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFFDF0F4),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
+                                    // Live price preview
+                                    ValueListenableBuilder(
+                                      valueListenable: _daysController,
+                                      builder: (_, value, __) {
+                                        final d = int.tryParse(value.text);
+                                        if (d == null || d <= 0)
+                                          return const SizedBox.shrink();
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 12,
                                           ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                _expiryLabel,
-                                                style: TextStyle(
-                                                  fontSize: 15,
-                                                  color: _expiryDate == null
-                                                      ? const Color(0xFFBBBBBB)
-                                                      : const Color(0xFF1a1a1a),
-                                                ),
-                                              ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 14,
+                                              vertical: 10,
                                             ),
-                                            if (_expiryDate != null)
-                                              GestureDetector(
-                                                onTap: () => setState(
-                                                  () => _expiryDate = null,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFFDF0F4),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.info_outline,
+                                                  size: 16,
+                                                  color: Color(0xFFEC4899),
                                                 ),
-                                                child: const Icon(
-                                                  Icons.close,
-                                                  color: Color(0xFF999999),
-                                                  size: 18,
+                                                const SizedBox(width: 8),
+                                                const Expanded(
+                                                  child: Text(
+                                                    'Final price will be confirmed before payment',
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: Color(0xFF666666),
+                                                    ),
+                                                  ),
                                                 ),
-                                              )
-                                            else
-                                              const Icon(
-                                                Icons.calendar_month_outlined,
-                                                color: Color(0xFF999999),
-                                                size: 22,
-                                              ),
-                                          ],
-                                        ),
-                                      ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
@@ -614,11 +699,11 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                         ),
                       ),
 
-                      // ── Create Offer button ─────────────────────────
+                      // ── Preview & Pay button ──────────────────────
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                         child: GestureDetector(
-                          onTap: _submitting ? null : _submit,
+                          onTap: _submitting ? null : _previewAndPay,
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 150),
                             width: double.infinity,
@@ -655,7 +740,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                         ),
                                         SizedBox(width: 12),
                                         Text(
-                                          'Creating...',
+                                          'Processing...',
                                           style: TextStyle(
                                             color: Colors.white,
                                             fontSize: 16,
@@ -664,14 +749,25 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                         ),
                                       ],
                                     )
-                                  : const Text(
-                                      'Create Offer',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.3,
-                                      ),
+                                  : const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.payment_outlined,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Preview & Pay',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                             ),
                           ),
@@ -688,101 +784,44 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
   }
 
-  // ── Offer type option tile ────────────────────────────────────────────────
+  // ── Reusable widgets ──────────────────────────────────────────────────────
 
-  Widget _offerTypeOption({
-    required String label,
-    required String value,
-    required IconData icon,
-    bool isPremium = false,
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    int maxLines = 1,
+    TextCapitalization capitalization = TextCapitalization.none,
+    TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter>? inputFormatters,
+    Widget? prefixIcon,
+    String? suffixText,
   }) {
-    final selected = _selectedOfferType == value;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedOfferType = value),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(vertical: 18),
-            decoration: BoxDecoration(
-              color: selected ? const Color(0xFFFDF0F4) : Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFFEC4899)
-                    : const Color(0xFFEEEEEE),
-                width: 1.5,
-              ),
-            ),
-            child: Column(
-              children: [
-                Icon(
-                  icon,
-                  color: selected
-                      ? const Color(0xFFEC4899)
-                      : const Color(0xFF999999),
-                  size: 28,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: selected
-                        ? const Color(0xFFEC4899)
-                        : const Color(0xFF555555),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (isPremium)
-            Positioned(
-              top: -12,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFF48FB1),
-                        Color(0xFFF8BBD0),
-                        Color(0xFFFFF5F8),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.auto_awesome, color: Colors.white, size: 12),
-                      SizedBox(width: 4),
-                      Text(
-                        'Premium',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      textCapitalization: capitalization,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      style: const TextStyle(fontSize: 15, color: Color(0xFF1a1a1a)),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 14),
+        prefixIcon: prefixIcon,
+        suffixText: suffixText,
+        suffixStyle: const TextStyle(color: Color(0xFF999999), fontSize: 14),
+        filled: true,
+        fillColor: const Color(0xFFFDF0F4),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: prefixIcon != null ? 4 : 16,
+          vertical: 14,
+        ),
       ),
     );
   }
-
-  // ── Card wrapper ──────────────────────────────────────────────────────────
 
   Widget _buildCard({required Widget child}) {
     return Container(

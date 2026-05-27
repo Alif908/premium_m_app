@@ -165,110 +165,116 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
 
     final store = _store!;
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Profile Header Card ────────────────────────────────────
-          _ProfileHeaderCard(store: store),
+    return RefreshIndicator(
+      onRefresh: _loadProfile,
+      color: const Color(0xFFFF4D94),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Profile Header Card ────────────────────────────────────
+            _ProfileHeaderCard(store: store),
 
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
 
-          // ── Stats Row ──────────────────────────────────────────────
-          _StatsRow(store: store),
+            // ── Stats Row ──────────────────────────────────────────────
+            _StatsRow(store: store),
 
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
 
-          // ── Section Label ──────────────────────────────────────────
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 10),
-            child: Text(
-              'Store',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF9E9E9E),
-                letterSpacing: 0.8,
+            // ── Section Label ──────────────────────────────────────────
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 10),
+              child: Text(
+                'Store',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF9E9E9E),
+                  letterSpacing: 0.8,
+                ),
               ),
             ),
-          ),
 
-          // ── Shop Details + Subscription grouped card ───────────────
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFF4D94).withOpacity(0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                _SettingsTileItem(
-                  icon: Icons.store_rounded,
-                  title: 'Shop Details',
-                  subtitle: store.storeName,
-                  onTap: () {},
-                  showDivider: true,
-                ),
-                _SettingsTileItem(
-                  icon: Icons.workspace_premium_rounded,
-                  title: 'Subscription',
-                  subtitle: _subscriptionSubtitle(store),
-                  subtitleColor: _subscriptionSubtitleColor(store),
-                  onTap: () {},
-                  showDivider: false,
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
-          // ── Section Label ──────────────────────────────────────────
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 10),
-            child: Text(
-              'Legal',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF9E9E9E),
-                letterSpacing: 0.8,
+            // ── Shop Details + Subscription grouped card ───────────────
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.95),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF4D94).withOpacity(0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _SettingsTileItem(
+                    icon: Icons.store_rounded,
+                    title: 'Shop Details',
+                    subtitle: store.storeName,
+                    onTap: () {},
+                    showDivider: true,
+                  ),
+                  _SettingsTileItem(
+                    icon: Icons.workspace_premium_rounded,
+                    title: 'Subscription',
+                    subtitle: _subscriptionSubtitle(store),
+                    subtitleColor: _subscriptionSubtitleColor(store),
+                    onTap: () {},
+                    showDivider: false,
+                  ),
+                ],
               ),
             ),
-          ),
 
-          // ── Links Card ─────────────────────────────────────────────
-          const _LinksCard(),
+            const SizedBox(height: 14),
 
-          const SizedBox(height: 24),
-
-          // ── Version ────────────────────────────────────────────────
-          const Center(
-            child: Text(
-              'Version 2.1.0',
-              style: TextStyle(
-                fontSize: 12,
-                color: Color(0xFFBBBBBB),
-                fontWeight: FontWeight.w400,
+            // ── Section Label ──────────────────────────────────────────
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 10),
+              child: Text(
+                'Legal',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF9E9E9E),
+                  letterSpacing: 0.8,
+                ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 14),
+            // ── Links Card ─────────────────────────────────────────────
+            const _LinksCard(),
 
-          // ── Logout Button ──────────────────────────────────────────
-          const _LogoutButton(),
+            const SizedBox(height: 24),
 
-          const SizedBox(height: 36),
-        ],
+            // ── Version ────────────────────────────────────────────────
+            const Center(
+              child: Text(
+                'Version 2.1.0',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFBBBBBB),
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Logout Button ──────────────────────────────────────────
+            const _LogoutButton(),
+
+            const SizedBox(height: 36),
+          ],
+        ),
       ),
     );
   }

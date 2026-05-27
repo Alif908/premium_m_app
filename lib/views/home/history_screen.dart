@@ -79,177 +79,184 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            return SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    children: [
-                      // ── Top bar ──────────────────────────
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 16,
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: GestureDetector(
-                                onTap: () => Navigator.of(context).maybePop(),
-                                child: const Icon(
-                                  Icons.close,
-                                  size: 24,
+            return RefreshIndicator(
+              onRefresh: _fetchTransactions,
+              color: const Color(0xFFEC4899),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      children: [
+                        // ── Top bar ──────────────────────────
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 16,
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: GestureDetector(
+                                  onTap: () => Navigator.of(context).maybePop(),
+                                  child: const Icon(
+                                    Icons.close,
+                                    size: 24,
+                                    color: Color(0xFF1a1a1a),
+                                  ),
+                                ),
+                              ),
+                              const Text(
+                                'Transaction History',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
                                   color: Color(0xFF1a1a1a),
                                 ),
                               ),
-                            ),
-                            const Text(
-                              'Transaction History',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1a1a1a),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 8),
-
-                              // ── Summary cards ─────────────
-                              Row(
-                                children: [
-                                  _buildSummaryCard('Total', _totalAmount),
-                                  const SizedBox(width: 10),
-                                  _buildSummaryCard('Points', _totalPoints),
-                                  const SizedBox(width: 10),
-                                  _buildSummaryCard('Count', '$_count'),
-                                ],
-                              ),
-
-                              const SizedBox(height: 20),
-
-                              // ── Filter row ────────────────
-                              Row(
-                                children: [
-                                  _buildFilterChip('Today'),
-                                  const SizedBox(width: 8),
-                                  _buildFilterChip('Week'),
-                                  const SizedBox(width: 8),
-                                  _buildFilterChip('Month'),
-                                  const Spacer(),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    child: const Icon(
-                                      Icons.filter_alt_outlined,
-                                      color: Color(0xFF555555),
-                                      size: 22,
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                              const SizedBox(height: 16),
-
-                              // ── Body: loading / error / list ──
-                              if (_isLoading)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 40),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      color: Color(0xFFEC4899),
-                                    ),
-                                  ),
-                                )
-                              else if (_errorMessage != null)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 40,
-                                  ),
-                                  child: Center(
-                                    child: Column(
-                                      children: [
-                                        const Icon(
-                                          Icons.error_outline,
-                                          color: Color(0xFFEC4899),
-                                          size: 40,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'Failed to load transactions',
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            color: Color(0xFF555555),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        GestureDetector(
-                                          onTap: _fetchTransactions,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 20,
-                                              vertical: 10,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              gradient: const LinearGradient(
-                                                colors: [
-                                                  Color(0xFFF48FB1),
-                                                  Color(0xFFF8BBD0),
-                                                ],
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(30),
-                                            ),
-                                            child: const Text(
-                                              'Retry',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                )
-                              else if (_transactions.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 40),
-                                  child: Center(
-                                    child: Text(
-                                      'No transactions found',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Color(0xFF999999),
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                // Uses StoreTransactionModel getters:
-                                // .initials, .displayName, .formattedTime,
-                                // .formattedAmount, .formattedPoints
-                                ..._transactions.map(
-                                  (t) => _buildTransactionCard(t),
-                                ),
-
-                              const SizedBox(height: 24),
                             ],
                           ),
                         ),
-                      ),
-                    ],
+
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 8),
+
+                                // ── Summary cards ─────────────
+                                Row(
+                                  children: [
+                                    _buildSummaryCard('Total', _totalAmount),
+                                    const SizedBox(width: 10),
+                                    _buildSummaryCard('Points', _totalPoints),
+                                    const SizedBox(width: 10),
+                                    _buildSummaryCard('Count', '$_count'),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 20),
+
+                                // ── Filter row ────────────────
+                                Row(
+                                  children: [
+                                    _buildFilterChip('Today'),
+                                    const SizedBox(width: 8),
+                                    _buildFilterChip('Week'),
+                                    const SizedBox(width: 8),
+                                    _buildFilterChip('Month'),
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      child: const Icon(
+                                        Icons.filter_alt_outlined,
+                                        color: Color(0xFF555555),
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                // ── Body: loading / error / list ──
+                                if (_isLoading)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 40),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        color: Color(0xFFEC4899),
+                                      ),
+                                    ),
+                                  )
+                                else if (_errorMessage != null)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 40,
+                                    ),
+                                    child: Center(
+                                      child: Column(
+                                        children: [
+                                          const Icon(
+                                            Icons.error_outline,
+                                            color: Color(0xFFEC4899),
+                                            size: 40,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            'Failed to load transactions',
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              color: Color(0xFF555555),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          GestureDetector(
+                                            onTap: _fetchTransactions,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 20,
+                                                    vertical: 10,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [
+                                                    Color(0xFFF48FB1),
+                                                    Color(0xFFF8BBD0),
+                                                  ],
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(30),
+                                              ),
+                                              child: const Text(
+                                                'Retry',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                else if (_transactions.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 40),
+                                    child: Center(
+                                      child: Text(
+                                        'No transactions found',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Color(0xFF999999),
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  // Uses StoreTransactionModel getters:
+                                  // .initials, .displayName, .formattedTime,
+                                  // .formattedAmount, .formattedPoints
+                                  ..._transactions.map(
+                                    (t) => _buildTransactionCard(t),
+                                  ),
+
+                                const SizedBox(height: 24),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

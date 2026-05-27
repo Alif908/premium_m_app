@@ -217,7 +217,6 @@ class SubscriptionAddonModel {
 // ─────────────────────────────────────────────────────────────
 // STORE ACTIVE ADDON MODEL
 // Source: GET /api/store/my-addons → [...]
-// Tracks which addons the store has currently purchased
 // ─────────────────────────────────────────────────────────────
 
 class StoreActiveAddonModel {
@@ -227,7 +226,7 @@ class StoreActiveAddonModel {
   final DateTime startDate;
   final DateTime expiryDate;
   final String status; // "active" | "expired"
-  final SubscriptionAddonModel? addon; // joined addon details
+  final SubscriptionAddonModel? addon;
 
   const StoreActiveAddonModel({
     required this.id,
@@ -241,14 +240,10 @@ class StoreActiveAddonModel {
 
   factory StoreActiveAddonModel.fromJson(Map<String, dynamic> json) {
     _log('StoreActiveAddonModel.fromJson → raw: $json');
-
-    // Backend joins SubscriptionAddon — could be nested as json['SubscriptionAddon'] or json['addon']
     final addonJson =
         json['SubscriptionAddon'] as Map<String, dynamic>? ??
         json['addon'] as Map<String, dynamic>?;
-
     _log('StoreActiveAddonModel → addonJson: $addonJson');
-
     return StoreActiveAddonModel(
       id: json['id'] ?? 0,
       storeId: json['store_id'] ?? 0,
@@ -262,7 +257,6 @@ class StoreActiveAddonModel {
     );
   }
 
-  /// True only if status is active AND expiry hasn't passed
   bool get isActive => status == 'active' && expiryDate.isAfter(DateTime.now());
 
   int get daysLeft {
@@ -291,7 +285,7 @@ class StoreActiveAddonModel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// RAZORPAY ORDER MODEL
+// RAZORPAY ORDER MODEL (subscription)
 // Source: POST /api/store/create-order → { order: {...}, plan: {...} }
 // ─────────────────────────────────────────────────────────────
 
@@ -329,11 +323,66 @@ class RazorpayOrderModel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// OFFER MODEL  (Flares)
+// RAZORPAY OFFER ORDER MODEL
+// Source: POST /api/store/purchase-offer
+// → { order, addon, total_price, offer_data: { title, description, days, banner } }
+// ─────────────────────────────────────────────────────────────
+
+class RazorpayOfferOrderModel {
+  final String orderId;
+  final int amountPaise;
+  final String currency;
+  final String receipt;
+  final double totalPrice;
+  final double addonPricePerDay;
+  // offer_data fields — carried from step 1 to step 2
+  final String offerTitle;
+  final String offerDescription;
+  final int days;
+  final String? banner; // filename saved on server in step 1
+
+  const RazorpayOfferOrderModel({
+    required this.orderId,
+    required this.amountPaise,
+    required this.currency,
+    required this.receipt,
+    required this.totalPrice,
+    required this.addonPricePerDay,
+    required this.offerTitle,
+    required this.offerDescription,
+    required this.days,
+    this.banner,
+  });
+
+  factory RazorpayOfferOrderModel.fromJson(Map<String, dynamic> json) {
+    _log('RazorpayOfferOrderModel.fromJson → raw: $json');
+
+    final order = json['order'] as Map<String, dynamic>;
+    final offerData = json['offer_data'] as Map<String, dynamic>? ?? {};
+    final addon = json['addon'] as Map<String, dynamic>? ?? {};
+
+    return RazorpayOfferOrderModel(
+      orderId: order['id']?.toString() ?? '',
+      amountPaise: order['amount'] ?? 0,
+      currency: order['currency']?.toString() ?? 'INR',
+      receipt: order['receipt']?.toString() ?? '',
+      totalPrice: _parseDouble(json['total_price']),
+      addonPricePerDay: _parseDouble(addon['price']),
+      offerTitle: offerData['title']?.toString() ?? '',
+      offerDescription: offerData['description']?.toString() ?? '',
+      days: _parseInt(offerData['days']) ?? 0,
+      banner: offerData['banner']?.toString(),
+    );
+  }
+
+  double get amountRupees => amountPaise / 100;
+  String get formattedTotalPrice => '₹${totalPrice.toStringAsFixed(0)}';
+  String get formattedPerDay => '₹${addonPricePerDay.toStringAsFixed(0)}/day';
+}
+
+// ─────────────────────────────────────────────────────────────
+// OFFER MODEL (Flares)
 // Source: GET /api/store/offer-list → [...]
-//         GET /api/store/offer/:id  → {...}
-//         POST /api/store/offer     → { offer: {...} }
-//         PUT  /api/store/offer/:id → { offer: {...} }
 // ─────────────────────────────────────────────────────────────
 
 class OfferModel {
@@ -390,7 +439,8 @@ class OfferModel {
 
 // ─────────────────────────────────────────────────────────────
 // SCAN QR RESPONSE MODELS
-// Source: POST /api/store/scan → { customer:{}, store:{}, transaction:{} }
+// Source: POST /store/instant-qr-transfer
+// → { message, reward_points, customer?, store?, transaction? }
 // ─────────────────────────────────────────────────────────────
 
 class ScanResultModel {
@@ -496,7 +546,47 @@ class ScanTransactionModel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// STORE TRANSACTION MODEL  (Customer QR scan history)
+// MANUAL TRANSFER RESULT MODEL
+// Source: POST /store/manual-phone-transfer
+// → { message, temporary_user, phone, reward_points, wallet_balance }
+// ─────────────────────────────────────────────────────────────
+
+class ManualTransferResultModel {
+  final String message;
+  final bool isTemporaryUser;
+  final String phone;
+  final double rewardPoints;
+  final double walletBalance;
+
+  const ManualTransferResultModel({
+    required this.message,
+    required this.isTemporaryUser,
+    required this.phone,
+    required this.rewardPoints,
+    required this.walletBalance,
+  });
+
+  factory ManualTransferResultModel.fromJson(Map<String, dynamic> json) {
+    _log('ManualTransferResultModel.fromJson → raw: $json');
+    return ManualTransferResultModel(
+      message: json['message']?.toString() ?? '',
+      isTemporaryUser: json['temporary_user'] == true,
+      phone: json['phone']?.toString() ?? '',
+      rewardPoints: _parseDouble(json['reward_points']),
+      walletBalance: _parseDouble(json['wallet_balance']),
+    );
+  }
+
+  String get formattedPoints => '+${rewardPoints.toStringAsFixed(2)} pts';
+  String get formattedBalance => '₹${walletBalance.toStringAsFixed(2)}';
+
+  String get statusMessage => isTemporaryUser
+      ? 'New account created for $phone. Points saved — ask them to sign up!'
+      : 'Points credited to $phone successfully';
+}
+
+// ─────────────────────────────────────────────────────────────
+// STORE TRANSACTION MODEL
 // Source: GET /api/store/transactions
 // ─────────────────────────────────────────────────────────────
 
@@ -525,7 +615,6 @@ class StoreTransactionModel {
     _log('StoreTransactionModel.fromJson → raw: $json');
     final userJson = json['User'] as Map<String, dynamic>?;
     final name = userJson?['name']?.toString() ?? json['user_name']?.toString();
-
     return StoreTransactionModel(
       id: json['id'] ?? 0,
       userId: json['user_id'] ?? 0,
@@ -575,7 +664,6 @@ class StoreTransactionModel {
     final period = h >= 12 ? 'PM' : 'AM';
     final displayH = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     final timeStr = '$displayH:$m $period';
-
     if (diff.inDays == 0) return 'Today, $timeStr';
     if (diff.inDays == 1) return 'Yesterday, $timeStr';
     if (diff.inDays < 7) {
@@ -610,7 +698,6 @@ class TransactionHistoryResponse {
     final list = (json['transactions'] as List? ?? [])
         .map((t) => StoreTransactionModel.fromJson(t as Map<String, dynamic>))
         .toList();
-
     return TransactionHistoryResponse(
       transactions: list,
       totalAmount: _parseDouble(json['total_amount']),
@@ -625,7 +712,7 @@ class TransactionHistoryResponse {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PRIVATE HELPERS  (file-level, not exported)
+// PRIVATE HELPERS
 // ─────────────────────────────────────────────────────────────
 
 void _log(String msg) {

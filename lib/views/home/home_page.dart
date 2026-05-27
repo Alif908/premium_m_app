@@ -66,63 +66,69 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 20),
-                _Header(store: _store),
-                const SizedBox(height: 20),
-                _ActiveSubscriptionBadge(store: _store),
-                const SizedBox(height: 20),
-                _StatsRow(store: _store),
-                const SizedBox(height: 20),
-                _ScanQrCard(),
-                const SizedBox(height: 28),
-                const Text(
-                  'Quick Actions',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1A1A1A),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _QuickActionTile(
-                  icon: Icons.add,
-                  title: 'Add Offer',
-                  subtitle: 'Create new promotion',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => CreateOfferScreen()),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _QuickActionTile(
-                  icon: Icons.history_rounded,
-                  title: 'Transaction History',
-                  subtitle: 'View all transactions',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const TransactionHistoryScreen(),
+          child: RefreshIndicator(
+            onRefresh: _loadStore,
+            color: const Color(0xFFEC4899),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 20),
+                  _Header(store: _store),
+                  const SizedBox(height: 20),
+                  _ActiveSubscriptionBadge(store: _store),
+                  const SizedBox(height: 20),
+                  _StatsRow(store: _store),
+                  const SizedBox(height: 20),
+                  _ScanQrCard(),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1A1A1A),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                _QuickActionTile(
-                  icon: Icons.credit_card_rounded,
-                  title: 'Payments & Wallet',
-                  subtitle: 'Manage subscription',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => PaymentsWalletScreen()),
+                  const SizedBox(height: 14),
+                  _QuickActionTile(
+                    icon: Icons.add,
+                    title: 'Add Offer',
+                    subtitle: 'Create new promotion',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => CreateOfferScreen()),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 32),
-              ],
+                  const SizedBox(height: 12),
+                  _QuickActionTile(
+                    icon: Icons.history_rounded,
+                    title: 'Transaction History',
+                    subtitle: 'View all transactions',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const TransactionHistoryScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _QuickActionTile(
+                    icon: Icons.credit_card_rounded,
+                    title: 'Payments & Wallet',
+                    subtitle: 'Manage subscription',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => PaymentsWalletScreen()),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                ],
+              ),
             ),
           ),
         ),

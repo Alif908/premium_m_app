@@ -470,128 +470,51 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   }
 
   Widget _buildBody() {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      color: const Color(0xFFEC4899),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
 
-          // ── Wallet Balance ────────────────────────────────────────────────
-          _buildCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFFF48FB1),
-                            Color(0xFFF8BBD0),
-                            Color(0xFFFFF5F8),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.account_balance_wallet_outlined,
-                        color: Colors.white,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Wallet Balance',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF888888),
-                            fontWeight: FontWeight.w400,
+            // ── Wallet Balance ────────────────────────────────────────────────
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [
+                              Color(0xFFF48FB1),
+                              Color(0xFFF8BBD0),
+                              Color(0xFFFFF5F8),
+                            ],
                           ),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatWallet(_walletBalance),
-                          style: const TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1a1a1a),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                GestureDetector(
-                  onTap: _showAddMoneyDialog,
-                  child: Container(
-                    width: double.infinity,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          Color(0xFFF48FB1),
-                          Color(0xFFF8BBD0),
-                          Color(0xFFFFF5F8),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'Add Money',
-                        style: TextStyle(
+                        child: const Icon(
+                          Icons.account_balance_wallet_outlined,
                           color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                          size: 22,
                         ),
                       ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // ── Current Plan card ─────────────────────────────────────────────
-          _buildCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFDF0F4),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.workspace_premium_outlined,
-                        color: Color(0xFFEC4899),
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
+                      const SizedBox(width: 14),
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Current Plan',
+                            'Wallet Balance',
                             style: TextStyle(
                               fontSize: 13,
                               color: Color(0xFF888888),
@@ -600,155 +523,44 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            _currentPlanName(),
+                            _formatWallet(_walletBalance),
                             style: const TextStyle(
-                              fontSize: 18,
+                              fontSize: 26,
                               fontWeight: FontWeight.w700,
                               color: Color(0xFF1a1a1a),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _isSubscriptionActive
-                            ? const Color(0xFFE8F8EF)
-                            : const Color(0xFFFFF3F3),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isSubscriptionActive
-                                ? Icons.check_circle_outline
-                                : Icons.cancel_outlined,
-                            color: _isSubscriptionActive
-                                ? const Color(0xFF22C55E)
-                                : const Color(0xFFEF4444),
-                            size: 14,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _isSubscriptionActive ? 'Active' : 'Inactive',
-                            style: TextStyle(
-                              color: _isSubscriptionActive
-                                  ? const Color(0xFF22C55E)
-                                  : const Color(0xFFEF4444),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                const Divider(color: Color(0xFFEEEEEE), height: 1),
-                const SizedBox(height: 16),
-                _buildPlanDetailRow('Plan Amount', _currentPlanPrice()),
-                const SizedBox(height: 12),
-                _buildPlanDetailRow(
-                  'Expires On',
-                  _store?.subscriptionExpiry != null
-                      ? _formatDate(_store!.subscriptionExpiry!)
-                      : '—',
-                ),
-                const SizedBox(height: 12),
-                _buildPlanDetailRow('Payment Method', 'Razorpay'),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // ── Available Plans ───────────────────────────────────────────────
-          const Text(
-            'Available Plans',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1a1a1a),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          if (_plans.isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'No plans available',
-                  style: TextStyle(color: Color(0xFF888888)),
-                ),
-              ),
-            )
-          else
-            ...List.generate(_plans.length, (i) {
-              final plan = _plans[i];
-              final isCurrent = plan.id == _currentPlanId;
-              final isPurchasing = _purchasingPlanId == plan.id;
-              final isRecommended =
-                  _plans.length == 3 && i == _plans.length - 1;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _buildPlanCard(
-                  plan: plan,
-                  isCurrent: isCurrent,
-                  isRecommended: isRecommended,
-                  isPurchasing: isPurchasing,
-                  onTap: () => _purchasePlan(plan),
-                ),
-              );
-            }),
-
-          const SizedBox(height: 24),
-
-          // ── Add-ons ───────────────────────────────────────────────────────
-          const Text(
-            'Add-ons',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1a1a1a),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // ── No subscription warning (PDF rule) ───────────────────────────
-          if (!_isSubscriptionActive)
-            Container(
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: const Color(0xFFFF9800).withOpacity(0.4),
-                  width: 1.2,
-                ),
-              ),
-              child: const Row(
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Color(0xFFFF9800),
-                    size: 18,
+                    ],
                   ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Purchase a subscription plan first to activate add-ons.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF555555),
-                        fontWeight: FontWeight.w500,
+                  const SizedBox(height: 18),
+                  GestureDetector(
+                    onTap: _showAddMoneyDialog,
+                    child: Container(
+                      width: double.infinity,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            Color(0xFFF48FB1),
+                            Color(0xFFF8BBD0),
+                            Color(0xFFFFF5F8),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'Add Money',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -756,26 +568,223 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
               ),
             ),
 
-          if (_addons.isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'No add-ons available',
-                  style: TextStyle(color: Color(0xFF888888)),
-                ),
-              ),
-            )
-          else
-            ..._addons.map(
-              (addon) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _buildAddonCard(addon: addon),
+            const SizedBox(height: 16),
+
+            // ── Current Plan card ─────────────────────────────────────────────
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFDF0F4),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.workspace_premium_outlined,
+                          color: Color(0xFFEC4899),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Current Plan',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF888888),
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _currentPlanName(),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1a1a1a),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _isSubscriptionActive
+                              ? const Color(0xFFE8F8EF)
+                              : const Color(0xFFFFF3F3),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isSubscriptionActive
+                                  ? Icons.check_circle_outline
+                                  : Icons.cancel_outlined,
+                              color: _isSubscriptionActive
+                                  ? const Color(0xFF22C55E)
+                                  : const Color(0xFFEF4444),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _isSubscriptionActive ? 'Active' : 'Inactive',
+                              style: TextStyle(
+                                color: _isSubscriptionActive
+                                    ? const Color(0xFF22C55E)
+                                    : const Color(0xFFEF4444),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  const Divider(color: Color(0xFFEEEEEE), height: 1),
+                  const SizedBox(height: 16),
+                  _buildPlanDetailRow('Plan Amount', _currentPlanPrice()),
+                  const SizedBox(height: 12),
+                  _buildPlanDetailRow(
+                    'Expires On',
+                    _store?.subscriptionExpiry != null
+                        ? _formatDate(_store!.subscriptionExpiry!)
+                        : '—',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildPlanDetailRow('Payment Method', 'Razorpay'),
+                ],
               ),
             ),
 
-          const SizedBox(height: 30),
-        ],
+            const SizedBox(height: 24),
+
+            // ── Available Plans ───────────────────────────────────────────────
+            const Text(
+              'Available Plans',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1a1a1a),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            if (_plans.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text(
+                    'No plans available',
+                    style: TextStyle(color: Color(0xFF888888)),
+                  ),
+                ),
+              )
+            else
+              ...List.generate(_plans.length, (i) {
+                final plan = _plans[i];
+                final isCurrent = plan.id == _currentPlanId;
+                final isPurchasing = _purchasingPlanId == plan.id;
+                final isRecommended =
+                    _plans.length == 3 && i == _plans.length - 1;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildPlanCard(
+                    plan: plan,
+                    isCurrent: isCurrent,
+                    isRecommended: isRecommended,
+                    isPurchasing: isPurchasing,
+                    onTap: () => _purchasePlan(plan),
+                  ),
+                );
+              }),
+
+            const SizedBox(height: 24),
+
+            // ── Add-ons ───────────────────────────────────────────────────────
+            const Text(
+              'Add-ons',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1a1a1a),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // ── No subscription warning (PDF rule) ───────────────────────────
+            if (!_isSubscriptionActive)
+              Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: const Color(0xFFFF9800).withOpacity(0.4),
+                    width: 1.2,
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: Color(0xFFFF9800),
+                      size: 18,
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Purchase a subscription plan first to activate add-ons.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF555555),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (_addons.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text(
+                    'No add-ons available',
+                    style: TextStyle(color: Color(0xFF888888)),
+                  ),
+                ),
+              )
+            else
+              ..._addons.map(
+                (addon) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildAddonCard(addon: addon),
+                ),
+              ),
+
+            const SizedBox(height: 30),
+          ],
+        ),
       ),
     );
   }

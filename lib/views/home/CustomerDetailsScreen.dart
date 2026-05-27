@@ -1,10 +1,28 @@
+// ============================================================
+// lib/views/home/CustomerDetailsScreen.dart
+//
+// Used by Approach 1 (QR + phone lookup) and Approach 2 (instant QR).
+// NOT used by Approach 3 — that flows entirely inside QRScannerScreen.
+//
+// Flow:
+//   1. Receives userId from QRScannerScreen (already resolved)
+//   2. No pre-fetch of user profile — avoids a wasted round-trip
+//   3. Store owner enters purchase amount
+//   4. "Confirm & Add Points" → StoreApiService.scanQr()
+//        POST /store/instant-qr-transfer
+//        body: { qr_data: { user_id }, purchase_amount }
+//   5. Response → ScanResultModel → success overlay → auto-pop after 3s
+//
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:premium_m_app/services/store_api_service.dart';
 import 'package:premium_m_app/models/store_model.dart';
+import 'package:premium_m_app/services/store_api_service.dart';
 
 class CustomerDetailsScreen extends StatefulWidget {
-  final int userId; // ← passed from QR scan
+  /// userId resolved from QR scan (Approach 2) or phone lookup (Approach 1)
+  final int userId;
 
   const CustomerDetailsScreen({super.key, required this.userId});
 
@@ -12,475 +30,849 @@ class CustomerDetailsScreen extends StatefulWidget {
   State<CustomerDetailsScreen> createState() => _CustomerDetailsScreenState();
 }
 
-class _CustomerDetailsScreenState extends State<CustomerDetailsScreen> {
-  final TextEditingController _amountController = TextEditingController(
-    text: '0',
-  );
+class _CustomerDetailsScreenState extends State<CustomerDetailsScreen>
+    with TickerProviderStateMixin {
+  // ── Input ─────────────────────────────────────────────────
+  final TextEditingController _amountCtrl = TextEditingController(text: '0');
   final FocusNode _focusNode = FocusNode();
   bool _isFocused = false;
+
+  // ── API state ─────────────────────────────────────────────
   bool _isLoading = false;
+  ScanResultModel? _result;
+  bool _showSuccess = false;
 
-  // Real data from scan result
-  ScanResultModel? _scanResult;
+  // ── Success animation ─────────────────────────────────────
+  late final AnimationController _successCtrl;
+  late final Animation<double> _successScale;
+  late final Animation<double> _successFade;
 
-  // Fallback display values before confirm
-  String get customerName => _scanResult?.customer.name ?? 'Customer';
-  String get customerInitials {
-    final name = customerName;
-    final parts = name.trim().split(' ');
-    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
+  // ── Quick-amount presets ──────────────────────────────────
+  static const List<int> _presets = [100, 250, 500, 1000];
 
-  double get currentPoints => _scanResult?.customer.walletBalance ?? 0;
-  double get purchaseAmount => double.tryParse(_amountController.text) ?? 0;
-
-  // Optimistic preview using plan's reward % — shown before confirm
-  // After confirm, use real transaction data
-  double get newPoints => _scanResult != null
-      ? _scanResult!.transaction.rewardPoints
-      : (purchaseAmount * 0.01); // rough preview
-
-  double get totalPoints => _scanResult != null
-      ? (_scanResult!.customer.walletBalance +
-            _scanResult!.transaction.rewardPoints)
-      : currentPoints + newPoints;
+  double get _purchaseAmount => double.tryParse(_amountCtrl.text) ?? 0;
 
   @override
   void initState() {
     super.initState();
-    _amountController.addListener(() => setState(() {}));
+    debugPrint('🛍️ [CustomerDetails] initState — userId: ${widget.userId}');
+
+    _amountCtrl.addListener(() => setState(() {}));
     _focusNode.addListener(
       () => setState(() => _isFocused = _focusNode.hasFocus),
     );
+
+    _successCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 480),
+    );
+
+    _successScale = CurvedAnimation(
+      parent: _successCtrl,
+      curve: Curves.elasticOut,
+    );
+
+    _successFade = CurvedAnimation(parent: _successCtrl, curve: Curves.easeIn);
   }
 
   @override
   void dispose() {
-    _amountController.dispose();
+    _amountCtrl.dispose();
     _focusNode.dispose();
+    _successCtrl.dispose();
     super.dispose();
   }
 
-  void _increment() {
-    final val = (int.tryParse(_amountController.text) ?? 0) + 1;
-    _amountController.text = val.toString();
-    _amountController.selection = TextSelection.collapsed(
-      offset: _amountController.text.length,
-    );
-  }
+  // ══════════════════════════════════════════════════════════
+  // CONFIRM — Approach 1 & 2
+  // POST /store/instant-qr-transfer
+  // ══════════════════════════════════════════════════════════
 
-  void _decrement() {
-    final val = (int.tryParse(_amountController.text) ?? 0) - 1;
-    if (val < 0) return;
-    _amountController.text = val.toString();
-    _amountController.selection = TextSelection.collapsed(
-      offset: _amountController.text.length,
+  Future<void> _confirmAndAddPoints() async {
+    debugPrint(
+      '✅ [CustomerDetails] _confirmAndAddPoints — '
+      'userId: ${widget.userId}  amount: $_purchaseAmount',
     );
-  }
 
-  void _confirmAndAddPoints() async {
-    if (purchaseAmount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid purchase amount')),
-      );
+    if (_purchaseAmount <= 0) {
+      _showSnack('Enter a valid purchase amount');
       return;
     }
 
     setState(() => _isLoading = true);
+    _focusNode.unfocus();
 
     try {
+      // scanQr wraps POST /store/instant-qr-transfer
+      // body: { qr_data: { user_id }, purchase_amount }
       final result = await StoreApiService.scanQr(
         userId: widget.userId,
-        purchaseAmount: purchaseAmount,
+        purchaseAmount: _purchaseAmount,
+      );
+
+      debugPrint(
+        '✅ [CustomerDetails] scanQr success — '
+        'customer: ${result.customer.name ?? "ID#${result.customer.id}"}  '
+        'pts: ${result.transaction.rewardPoints}  '
+        'newBal: ${result.customer.walletBalance}',
       );
 
       if (!mounted) return;
 
-      setState(() => _scanResult = result);
+      setState(() {
+        _result = result;
+        _isLoading = false;
+        _showSuccess = true;
+      });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✅ ₹${result.transaction.rewardPoints.toStringAsFixed(2)} points added to ${result.customer.name ?? "customer"}',
-          ),
-          backgroundColor: const Color(0xFFEC4899),
-        ),
-      );
+      _successCtrl.forward();
+
+      // Auto-pop after 3 seconds → QRScannerScreen resumes scanning
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
     } on ApiException catch (e) {
+      debugPrint(
+        '🔴 [CustomerDetails] ApiException: [${e.statusCode}] ${e.message}',
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      setState(() => _isLoading = false);
+      _showSnack(e.message);
+    } catch (e) {
+      debugPrint('🔴 [CustomerDetails] Unknown error: $e');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showSnack('Something went wrong. Please try again.');
     }
   }
+
+  // ══════════════════════════════════════════════════════════
+  // AMOUNT HELPERS
+  // ══════════════════════════════════════════════════════════
+
+  void _setPreset(int value) {
+    _amountCtrl.text = value.toString();
+    _amountCtrl.selection = TextSelection.collapsed(
+      offset: _amountCtrl.text.length,
+    );
+    _focusNode.unfocus();
+  }
+
+  void _increment() {
+    final v = (_purchaseAmount.toInt()) + 1;
+    _amountCtrl.text = v.toString();
+    _amountCtrl.selection = TextSelection.collapsed(
+      offset: _amountCtrl.text.length,
+    );
+  }
+
+  void _decrement() {
+    final v = (_purchaseAmount.toInt()) - 1;
+    if (v < 0) return;
+    _amountCtrl.text = v.toString();
+    _amountCtrl.selection = TextSelection.collapsed(
+      offset: _amountCtrl.text.length,
+    );
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // RESET — clears the form on pull-to-refresh
+  // ══════════════════════════════════════════════════════════
+
+  Future<void> _resetForm() async {
+    setState(() {
+      _amountCtrl.text = '0';
+      _amountCtrl.selection = TextSelection.collapsed(offset: 1);
+      _result = null;
+      _showSuccess = false;
+    });
+    _focusNode.unfocus();
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // BUILD
+  // ══════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFDF0F4),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    children: [
-                      // Top bar
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 16,
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: GestureDetector(
-                                onTap: () => Navigator.of(context).maybePop(),
-                                child: const Icon(
-                                  Icons.close,
-                                  size: 24,
-                                  color: Color(0xFF1a1a1a),
-                                ),
-                              ),
-                            ),
-                            const Text(
-                              'Customer Details',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1a1a1a),
-                              ),
-                            ),
-                          ],
-                        ),
+      body: Stack(
+        children: [
+          // ── Main content ────────────────────────────────
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return RefreshIndicator(
+                  onRefresh: _resetForm,
+                  color: const Color(0xFFEC4899),
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
+                    ),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
                       ),
+                      child: IntrinsicHeight(
+                        child: Column(
+                          children: [
+                            // ── App bar ─────────────────────
+                            _buildTopBar(),
 
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 8),
-
-                              // Customer card
-                              _buildCard(
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 60,
-                                      height: 60,
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: [
-                                            Color(0xFFF472B6),
-                                            Color(0xFFEC4899),
-                                          ],
-                                        ),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          customerInitials,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 20,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.person_outline,
-                                              size: 18,
-                                              color: Color(0xFF555555),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              customerName,
-                                              style: const TextStyle(
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.w700,
-                                                color: Color(0xFF1a1a1a),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.military_tech_outlined,
-                                              size: 18,
-                                              color: Color(0xFFEC4899),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '${currentPoints.toStringAsFixed(2)} Points',
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w500,
-                                                color: Color(0xFF555555),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
                                 ),
-                              ),
-
-                              const SizedBox(height: 16),
-
-                              // Purchase amount card
-                              _buildCard(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
-                                      'Enter Purchase Amount',
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF1a1a1a),
-                                      ),
-                                    ),
+                                    const SizedBox(height: 8),
+
+                                    // ── Customer card ────────
+                                    _buildCustomerCard(),
+
                                     const SizedBox(height: 16),
-                                    AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 200,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: _isFocused
-                                              ? const Color(0xFFEC4899)
-                                              : const Color(0xFFF472B6),
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Padding(
-                                            padding: EdgeInsets.only(left: 16),
-                                            child: Text(
-                                              '₹',
-                                              style: TextStyle(
-                                                fontSize: 20,
-                                                color: Color(0xFFBBBBBB),
-                                                fontWeight: FontWeight.w400,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: TextField(
-                                              controller: _amountController,
-                                              focusNode: _focusNode,
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              inputFormatters: [
-                                                FilteringTextInputFormatter
-                                                    .digitsOnly,
-                                              ],
-                                              style: const TextStyle(
-                                                fontSize: 20,
-                                                color: Color(0xFF666666),
-                                                fontWeight: FontWeight.w400,
-                                              ),
-                                              decoration: const InputDecoration(
-                                                border: InputBorder.none,
-                                                isDense: true,
-                                                contentPadding:
-                                                    EdgeInsets.symmetric(
-                                                      vertical: 16,
-                                                    ),
-                                              ),
-                                              onTap: () {
-                                                if (_amountController.text ==
-                                                    '0') {
-                                                  _amountController.clear();
-                                                }
-                                              },
-                                            ),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 4,
-                                            ),
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                GestureDetector(
-                                                  onTap: _increment,
-                                                  child: Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 12,
-                                                          vertical: 5,
-                                                        ),
-                                                    child: const Icon(
-                                                      Icons.keyboard_arrow_up,
-                                                      size: 20,
-                                                      color: Color(0xFF999999),
-                                                    ),
-                                                  ),
-                                                ),
-                                                GestureDetector(
-                                                  onTap: _decrement,
-                                                  child: Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 12,
-                                                          vertical: 5,
-                                                        ),
-                                                    child: const Icon(
-                                                      Icons.keyboard_arrow_down,
-                                                      size: 20,
-                                                      color: Color(0xFF999999),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
+
+                                    // ── Amount card ──────────
+                                    _buildAmountCard(),
+
+                                    const SizedBox(height: 16),
+
+                                    // ── Quick presets ─────────
+                                    _buildPresetRow(),
+
+                                    const Spacer(),
                                   ],
                                 ),
                               ),
+                            ),
 
-                              const SizedBox(height: 16),
-
-                              // Points summary
-                              _buildCard(
-                                child: Column(
-                                  children: [
-                                    _PointsRow(
-                                      label: 'Current Points',
-                                      value: currentPoints.toStringAsFixed(2),
-                                      valueColor: const Color(0xFF1a1a1a),
-                                    ),
-                                    const Padding(
-                                      padding: EdgeInsets.symmetric(
-                                        vertical: 12,
-                                      ),
-                                      child: Divider(
-                                        color: Color(0xFFEEEEEE),
-                                        height: 1,
-                                      ),
-                                    ),
-                                    _PointsRow(
-                                      label: 'New Points',
-                                      value: '+${newPoints.toStringAsFixed(2)}',
-                                      valueColor: const Color(0xFF1a1a1a),
-                                    ),
-                                    const Padding(
-                                      padding: EdgeInsets.symmetric(
-                                        vertical: 12,
-                                      ),
-                                      child: Divider(
-                                        color: Color(0xFFEEEEEE),
-                                        height: 1,
-                                      ),
-                                    ),
-                                    _PointsRow(
-                                      label: 'Total Points',
-                                      value: totalPoints.toStringAsFixed(2),
-                                      valueColor: const Color(0xFFEC4899),
-                                      valueFontSize: 22,
-                                      valueFontWeight: FontWeight.w700,
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              const SizedBox(height: 24),
-                            ],
-                          ),
+                            // ── Confirm button ───────────────
+                            _buildConfirmButton(),
+                          ],
                         ),
                       ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
 
-                      // Confirm button
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                        child: GestureDetector(
-                          onTap: _isLoading ? null : _confirmAndAddPoints,
-                          child: Container(
-                            width: double.infinity,
-                            height: 58,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                                colors: [Color(0xFFF9A8D4), Color(0xFFEC4899)],
-                              ),
-                              borderRadius: BorderRadius.circular(18),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(
-                                    0xFFEC4899,
-                                  ).withOpacity(0.35),
-                                  blurRadius: 16,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ],
-                            ),
-                            child: Center(
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2.5,
-                                      ),
-                                    )
-                                  : const Text(
-                                      'Confirm & Add Points',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.3,
-                                      ),
-                                    ),
-                            ),
-                          ),
-                        ),
+          // ── Success overlay ──────────────────────────────
+          if (_showSuccess && _result != null) _buildSuccessOverlay(),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // COMPONENT BUILDERS
+  // ══════════════════════════════════════════════════════════
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.close,
+                  size: 20,
+                  color: Color(0xFF1a1a1a),
+                ),
+              ),
+            ),
+          ),
+          const Text(
+            'Add Points',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1a1a1a),
+            ),
+          ),
+          // Customer ID badge (top-right)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEC4899).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '#${widget.userId}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFEC4899),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomerCard() {
+    return _card(
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFF472B6), Color(0xFFEC4899)],
+              ),
+              shape: BoxShape.circle,
+            ),
+            child: const Center(
+              child: Icon(Icons.person_outline, color: Colors.white, size: 24),
+            ),
+          ),
+
+          const SizedBox(width: 14),
+
+          // Info
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Customer Scanned',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF999999),
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle,
+                    size: 15,
+                    color: Color(0xFF22C55E),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    'User ID #${widget.userId}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1a1a1a),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const Spacer(),
+
+          // Ready badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF22C55E).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              'Ready',
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFF22C55E),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmountCard() {
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Purchase Amount',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1a1a1a),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Reward points are calculated on confirm',
+            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+          ),
+          const SizedBox(height: 14),
+
+          // Amount input row
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _isFocused
+                    ? const Color(0xFFEC4899)
+                    : const Color(0xFFF472B6).withOpacity(0.6),
+                width: 1.5,
+              ),
+              boxShadow: _isFocused
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFFEC4899).withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : [],
+            ),
+            child: Row(
+              children: [
+                // Rupee prefix
+                const Padding(
+                  padding: EdgeInsets.only(left: 16),
+                  child: Text(
+                    '₹',
+                    style: TextStyle(
+                      fontSize: 22,
+                      color: Color(0xFFBBBBBB),
+                      fontWeight: FontWeight.w300,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Amount text field
+                Expanded(
+                  child: TextField(
+                    controller: _amountCtrl,
+                    focusNode: _focusNode,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,2}'),
+                      ),
+                    ],
+                    style: const TextStyle(
+                      fontSize: 22,
+                      color: Color(0xFF1a1a1a),
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    onTap: () {
+                      if (_amountCtrl.text == '0') {
+                        _amountCtrl.clear();
+                      }
+                    },
+                  ),
+                ),
+
+                // Stepper
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _stepperBtn(
+                        icon: Icons.keyboard_arrow_up,
+                        onTap: _increment,
+                      ),
+                      _stepperBtn(
+                        icon: Icons.keyboard_arrow_down,
+                        onTap: _decrement,
                       ),
                     ],
                   ),
                 ),
-              ),
-            );
-          },
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepperBtn({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: Icon(icon, size: 20, color: const Color(0xFF999999)),
+      ),
+    );
+  }
+
+  Widget _buildPresetRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick amounts',
+          style: TextStyle(
+            fontSize: 12,
+            color: const Color(0xFF1a1a1a).withOpacity(0.4),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: _presets
+              .map(
+                (v) => Expanded(
+                  child: GestureDetector(
+                    onTap: () => _setPreset(v),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: EdgeInsets.only(
+                        right: v != _presets.last ? 8 : 0,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _purchaseAmount == v.toDouble()
+                            ? const Color(0xFFEC4899).withOpacity(0.1)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _purchaseAmount == v.toDouble()
+                              ? const Color(0xFFEC4899)
+                              : const Color(0xFFEEEEEE),
+                          width: _purchaseAmount == v.toDouble() ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '₹$v',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _purchaseAmount == v.toDouble()
+                                ? const Color(0xFFEC4899)
+                                : const Color(0xFF666666),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConfirmButton() {
+    final hasValidAmount = _purchaseAmount > 0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: GestureDetector(
+        onTap: (_isLoading || !hasValidAmount) ? null : _confirmAndAddPoints,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: double.infinity,
+          height: 58,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: hasValidAmount
+                  ? [const Color(0xFFF9A8D4), const Color(0xFFEC4899)]
+                  : [
+                      const Color(0xFFF9A8D4).withOpacity(0.5),
+                      const Color(0xFFEC4899).withOpacity(0.5),
+                    ],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: hasValidAmount
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFFEC4899).withOpacity(0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : [],
+          ),
+          child: Center(
+            child: _isLoading
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+                      SizedBox(width: 6),
+                      Text(
+                        'Confirm & Add Points',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  // ══════════════════════════════════════════════════════════
+  // SUCCESS OVERLAY
+  // Built from ScanResultModel returned by scanQr()
+  // ══════════════════════════════════════════════════════════
+
+  Widget _buildSuccessOverlay() {
+    final r = _result!;
+    final customerName = r.customer.name?.trim();
+    final hasName = customerName != null && customerName.isNotEmpty;
+
+    return FadeTransition(
+      opacity: _successFade,
+      child: Container(
+        color: Colors.black.withOpacity(0.65),
+        child: Center(
+          child: ScaleTransition(
+            scale: _successScale,
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 28),
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFEC4899).withOpacity(0.18),
+                    blurRadius: 40,
+                    spreadRadius: 8,
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Check icon
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFFF472B6), Color(0xFFEC4899)],
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 38,
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  const Text(
+                    'Points Added!',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1a1a1a),
+                    ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // Customer name (if returned by API) or fallback
+                  if (hasName)
+                    Text(
+                      customerName!,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: Color(0xFF555555),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    )
+                  else
+                    Text(
+                      'User #${r.customer.id}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF999999),
+                      ),
+                    ),
+
+                  const SizedBox(height: 22),
+
+                  // Points badge
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFDF0F4),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '+${r.transaction.rewardPoints.toStringAsFixed(2)} pts',
+                          style: const TextStyle(
+                            fontSize: 34,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFEC4899),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'on ₹${r.transaction.purchaseAmount.toStringAsFixed(0)} purchase',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF999999),
+                          ),
+                        ),
+                        if (r.transaction.rewardPercentage > 0) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '${r.transaction.rewardPercentage.toStringAsFixed(1)}% reward rate',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFFBBBBBB),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // New wallet balance
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.account_balance_wallet_outlined,
+                        size: 14,
+                        color: Color(0xFF888888),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'New Balance: ₹${r.customer.walletBalance.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF555555),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Store balance (if returned by API)
+                  if (r.store.walletBalance > 0)
+                    Text(
+                      'Store wallet: ₹${r.store.walletBalance.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFFBBBBBB),
+                      ),
+                    ),
+
+                  const SizedBox(height: 16),
+
+                  // Auto-close indicator
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFDDDDDD),
+                          strokeWidth: 1.5,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Returning to scanner…',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFBBBBBB),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // HELPERS
+  // ══════════════════════════════════════════════════════════
+
+  Widget _card({required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -489,7 +881,7 @@ class _CustomerDetailsScreenState extends State<CustomerDetailsScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEC4899).withOpacity(0.08),
+            color: const Color(0xFFEC4899).withOpacity(0.07),
             blurRadius: 20,
             spreadRadius: 4,
             offset: const Offset(0, 4),
@@ -497,47 +889,6 @@ class _CustomerDetailsScreenState extends State<CustomerDetailsScreen> {
         ],
       ),
       child: child,
-    );
-  }
-}
-
-class _PointsRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color valueColor;
-  final double valueFontSize;
-  final FontWeight valueFontWeight;
-
-  const _PointsRow({
-    required this.label,
-    required this.value,
-    required this.valueColor,
-    this.valueFontSize = 18,
-    this.valueFontWeight = FontWeight.w600,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF555555),
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: valueFontSize,
-            fontWeight: valueFontWeight,
-            color: valueColor,
-          ),
-        ),
-      ],
     );
   }
 }
