@@ -1,3 +1,9 @@
+// ============================================================
+// lib/screens/history_screen.dart
+// Partner Store App — Transaction History Screen
+// Preserves exact UI & layout structure without changes
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
@@ -52,7 +58,11 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          if (e is ApiException) {
+            _errorMessage = e.message;
+          } else {
+            _errorMessage = 'Something went wrong. Please try again.';
+          }
           _isLoading = false;
         });
       }
@@ -191,11 +201,12 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                           ),
                                           const SizedBox(height: 12),
                                           Text(
-                                            'Failed to load transactions',
+                                            _errorMessage!,
                                             style: const TextStyle(
                                               fontSize: 14,
                                               color: Color(0xFF555555),
                                             ),
+                                            textAlign: TextAlign.center,
                                           ),
                                           const SizedBox(height: 12),
                                           GestureDetector(
@@ -243,9 +254,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                     ),
                                   )
                                 else
-                                  // Uses StoreTransactionModel getters:
-                                  // .initials, .displayName, .formattedTime,
-                                  // .formattedAmount, .formattedPoints
                                   ..._transactions.map(
                                     (t) => _buildTransactionCard(t),
                                   ),

@@ -22,7 +22,7 @@ class StoreModel {
   final String city;
   final String? shopImage;
   final String? idProof;
-  final String status; // "pending" | "approved" | "rejected"
+  final String status; 
   final String subscriptionStatus; // "inactive" | "active" | "expired"
   final int? subscriptionPlanId;
   final DateTime? subscriptionExpiry;
@@ -83,12 +83,26 @@ class StoreModel {
 
   bool get isExpiringSoon {
     if (subscriptionExpiry == null || !isSubscriptionActive) return false;
-    return subscriptionExpiry!.difference(DateTime.now()).inDays <= 7;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(
+      subscriptionExpiry!.year,
+      subscriptionExpiry!.month,
+      subscriptionExpiry!.day,
+    );
+    return expiry.difference(today).inDays <= 7 && expiry.isAfter(today);
   }
 
   int get daysLeft {
     if (subscriptionExpiry == null) return 0;
-    final diff = subscriptionExpiry!.difference(DateTime.now()).inDays;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(
+      subscriptionExpiry!.year,
+      subscriptionExpiry!.month,
+      subscriptionExpiry!.day,
+    );
+    final diff = expiry.difference(today).inDays;
     return diff < 0 ? 0 : diff;
   }
 
@@ -257,10 +271,19 @@ class StoreActiveAddonModel {
     );
   }
 
-  bool get isActive => status == 'active' && expiryDate.isAfter(DateTime.now());
+  bool get isActive {
+    if (status != 'active') return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+    return expiry.isAfter(today) || expiry.isAtSameMomentAs(today);
+  }
 
   int get daysLeft {
-    final diff = expiryDate.difference(DateTime.now()).inDays;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+    final diff = expiry.difference(today).inDays;
     return diff < 0 ? 0 : diff;
   }
 
@@ -335,11 +358,10 @@ class RazorpayOfferOrderModel {
   final String receipt;
   final double totalPrice;
   final double addonPricePerDay;
-  // offer_data fields — carried from step 1 to step 2
   final String offerTitle;
   final String offerDescription;
   final int days;
-  final String? banner; // filename saved on server in step 1
+  final String? banner;
 
   const RazorpayOfferOrderModel({
     required this.orderId,
@@ -428,19 +450,32 @@ class OfferModel {
 
   bool get isExpired {
     if (expiryDate == null) return false;
-    return expiryDate!.isBefore(DateTime.now());
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(
+      expiryDate!.year,
+      expiryDate!.month,
+      expiryDate!.day,
+    );
+    return expiry.isBefore(today);
   }
 
   int get daysUntilExpiry {
     if (expiryDate == null) return 999;
-    return expiryDate!.difference(DateTime.now()).inDays;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiry = DateTime(
+      expiryDate!.year,
+      expiryDate!.month,
+      expiryDate!.day,
+    );
+    return expiry.difference(today).inDays;
   }
 }
 
 // ─────────────────────────────────────────────────────────────
 // SCAN QR RESPONSE MODELS
 // Source: POST /store/instant-qr-transfer
-// → { message, reward_points, customer?, store?, transaction? }
 // ─────────────────────────────────────────────────────────────
 
 class ScanResultModel {
@@ -548,7 +583,6 @@ class ScanTransactionModel {
 // ─────────────────────────────────────────────────────────────
 // MANUAL TRANSFER RESULT MODEL
 // Source: POST /store/manual-phone-transfer
-// → { message, temporary_user, phone, reward_points, wallet_balance }
 // ─────────────────────────────────────────────────────────────
 
 class ManualTransferResultModel {
@@ -658,26 +692,34 @@ class StoreTransactionModel {
   String get formattedTime {
     if (createdAt == null) return '';
     final now = DateTime.now();
-    final diff = now.difference(createdAt!);
+    final today = DateTime(now.year, now.month, now.day);
+    final createdDay = DateTime(
+      createdAt!.year,
+      createdAt!.month,
+      createdAt!.day,
+    );
+    final diffInDays = today.difference(createdDay).inDays;
+
     final h = createdAt!.hour;
     final m = createdAt!.minute.toString().padLeft(2, '0');
     final period = h >= 12 ? 'PM' : 'AM';
     final displayH = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     final timeStr = '$displayH:$m $period';
-    if (diff.inDays == 0) return 'Today, $timeStr';
-    if (diff.inDays == 1) return 'Yesterday, $timeStr';
-    if (diff.inDays < 7) {
+
+    if (diffInDays == 0) return 'Today, $timeStr';
+    if (diffInDays == 1) return 'Yesterday, $timeStr';
+    if (diffInDays < 7) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      return days[createdAt!.weekday - 1];
+      return '${days[createdAt!.weekday - 1]}, $timeStr';
     }
-    return '${diff.inDays ~/ 7}w ago';
+    final weeks = diffInDays ~/ 7;
+    return '${weeks == 0 ? 1 : weeks}w ago';
   }
 }
 
 // ─────────────────────────────────────────────────────────────
 // TRANSACTION HISTORY RESPONSE
 // Source: GET /api/store/transactions
-// → { transactions:[...], total_amount, total_points, count }
 // ─────────────────────────────────────────────────────────────
 
 class TransactionHistoryResponse {

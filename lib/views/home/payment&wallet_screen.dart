@@ -1,10 +1,11 @@
 import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PaymentsWalletScreen — fully API-integrated with Addon purchase flow
+// PaymentsWalletScreen — fully API-integrated with Razorpay subscription flow
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PaymentsWalletScreen extends StatefulWidget {
@@ -21,7 +22,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
   List<SubscriptionPlanModel> _plans = [];
   List<SubscriptionAddonModel> _addons = [];
-  List<StoreActiveAddonModel> _myAddons = []; // ← NEW: active addons
+  List<StoreActiveAddonModel> _myAddons = [];
   double _walletBalance = 0.0;
 
   StoreModel? _store;
@@ -30,12 +31,130 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   int? _purchasingPlanId;
 
   // Which addon_id is currently being purchased
-  int? _purchasingAddonId; // ← NEW
+  int? _purchasingAddonId;
+
+  // ── Razorpay ───────────────────────────────────────────────────────────────
+  late Razorpay _razorpay;
+
+  // Cached pending order — needed after payment success callback
+  RazorpayOrderModel? _pendingOrder;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
+
+    // Razorpay setup
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  // ── Razorpay Callbacks ─────────────────────────────────────────────────────
+
+  void _onPaymentSuccess(PaymentSuccessResponse response) async {
+    dev.log(
+      '✅ [Razorpay] Payment success | orderId: ${response.orderId} | paymentId: ${response.paymentId}',
+      name: 'PaymentsWalletScreen',
+    );
+
+    if (_pendingOrder == null) {
+      dev.log(
+        '🔴 [Razorpay] _pendingOrder is null — cannot verify',
+        name: 'PaymentsWalletScreen',
+      );
+      _showSnack(
+        'Payment received but verification failed. Contact support.',
+        isError: true,
+      );
+      if (mounted) setState(() => _purchasingPlanId = null);
+      return;
+    }
+
+    try {
+      final result = await StoreApiService.verifyPayment(
+        razorpayOrderId: response.orderId ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+        planId: _pendingOrder!.plan.id,
+      );
+
+      dev.log(
+        '✅ [Razorpay] Payment verified | expiry: ${result.expiry}',
+        name: 'PaymentsWalletScreen',
+      );
+
+      // Refresh everything so UI reflects new subscription
+      await _loadData();
+
+      if (mounted) {
+        _showSnack(
+          'Subscription activated! Expires ${_formatDate(result.expiry)} 🎉',
+        );
+      }
+    } on ApiException catch (e) {
+      dev.log(
+        '🔴 [Razorpay] verifyPayment ApiException: ${e.message}',
+        name: 'PaymentsWalletScreen',
+      );
+      if (mounted) _showSnack(e.message, isError: true);
+    } catch (e) {
+      dev.log(
+        '🔴 [Razorpay] verifyPayment unknown error: $e',
+        name: 'PaymentsWalletScreen',
+      );
+      if (mounted) {
+        _showSnack(
+          'Payment received but verification failed. Contact support.',
+          isError: true,
+        );
+      }
+    } finally {
+      _pendingOrder = null;
+      if (mounted) setState(() => _purchasingPlanId = null);
+    }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    dev.log(
+      '🔴 [Razorpay] Payment error | code: ${response.code} | message: ${response.message}',
+      name: 'PaymentsWalletScreen',
+    );
+    _pendingOrder = null;
+    if (mounted) {
+      setState(() => _purchasingPlanId = null);
+      _showSnack(
+        response.message?.isNotEmpty == true
+            ? response.message!
+            : 'Payment cancelled',
+        isError: true,
+      );
+    }
+  }
+
+  void _onExternalWallet(ExternalWalletResponse response) {
+    dev.log(
+      '💳 [Razorpay] External wallet: ${response.walletName}',
+      name: 'PaymentsWalletScreen',
+    );
+    _pendingOrder = null;
+    if (mounted) {
+      setState(() => _purchasingPlanId = null);
+      _showSnack(
+        'External wallet selected: ${response.walletName}',
+        isError: true,
+      );
+    }
   }
 
   // ── Data loading ───────────────────────────────────────────────────────────
@@ -47,14 +166,12 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     });
 
     try {
-      // Load core data — these must succeed
       final results = await Future.wait([
         StoreApiService.getPlans(),
         StoreApiService.getAddons(),
         StoreApiService.getProfile(),
       ]);
 
-      // Load my-addons separately — if endpoint not ready, fail silently
       List<StoreActiveAddonModel> myAddons = [];
       try {
         myAddons = await StoreApiService.getMyAddons();
@@ -63,7 +180,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
           name: 'PaymentsWalletScreen',
         );
       } catch (e) {
-        // Backend endpoint /store/my-addons may not exist yet — ignore
         dev.log(
           '⚠️ [_loadData] getMyAddons failed (endpoint may not exist yet): $e',
           name: 'PaymentsWalletScreen',
@@ -164,9 +280,10 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     }
   }
 
-  // ── Purchase Plan ──────────────────────────────────────────────────────────
+  // ── Purchase Plan — FULL RAZORPAY FLOW ────────────────────────────────────
 
   Future<void> _purchasePlan(SubscriptionPlanModel plan) async {
+    // Step 1: Confirm dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -175,9 +292,24 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
           'Switch to ${plan.name}?',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
-        content: Text(
-          '₹${plan.price.toStringAsFixed(0)}/month · ${plan.durationDays} days\n\n'
-          'You will be redirected to Razorpay to complete payment.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '₹${plan.price.toStringAsFixed(0)}/month · ${plan.durationDays} days',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFEC4899),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'You will be redirected to Razorpay to complete payment.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF555555)),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -206,27 +338,59 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     setState(() => _purchasingPlanId = plan.id);
 
     try {
+      // Step 2: Create Razorpay order on backend
       final order = await StoreApiService.createOrder(plan.id);
+      _pendingOrder = order;
 
-      // TODO: Open Razorpay SDK here
-      // On success: await StoreApiService.verifyPayment(...)
-
-      if (!mounted) return;
-      _showSnack(
-        'Order created: ${order.orderId}. Integrate Razorpay SDK to complete.',
+      dev.log(
+        '✅ [_purchasePlan] Order created: ${order.orderId} | amount: ₹${order.amountRupees}',
+        name: 'PaymentsWalletScreen',
       );
+
+      // Step 3: Open Razorpay payment sheet
+      final options = {
+        'key': 'rzp_test_RpQCDZttUbr3uO',
+        'order_id': order.orderId,
+        'amount': order.amountPaise,
+        'currency': order.currency,
+        'name': 'Premium Store',
+        'description': '${plan.name} · ${plan.durationDays} days',
+        'prefill': {
+          'contact': _store?.phone ?? '',
+          'email': _store?.email ?? '',
+        },
+        'theme': {'color': '#EC4899'},
+      };
+
+      _razorpay.open(options);
+
+      // NOTE: Do NOT setState here — result handled in _onPaymentSuccess / _onPaymentError
     } on ApiException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
-    } finally {
-      if (mounted) setState(() => _purchasingPlanId = null);
+      dev.log(
+        '🔴 [_purchasePlan] ApiException: ${e.message}',
+        name: 'PaymentsWalletScreen',
+      );
+      _pendingOrder = null;
+      if (mounted) {
+        _showSnack(e.message, isError: true);
+        setState(() => _purchasingPlanId = null);
+      }
+    } catch (e) {
+      dev.log(
+        '🔴 [_purchasePlan] Unknown error: $e',
+        name: 'PaymentsWalletScreen',
+      );
+      _pendingOrder = null;
+      if (mounted) {
+        _showSnack('Something went wrong. Please try again.', isError: true);
+        setState(() => _purchasingPlanId = null);
+      }
     }
   }
 
   // ── Purchase Addon ─────────────────────────────────────────────────────────
-  // NEW: Full addon purchase flow per PDF architecture
 
   Future<void> _purchaseAddon(SubscriptionAddonModel addon) async {
-    // 1. Check if store has active subscription first (PDF rule)
     if (!(_store?.isSubscriptionActive ?? false)) {
       _showSnack(
         'Active subscription required to purchase add-ons',
@@ -235,11 +399,9 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
       return;
     }
 
-    // 2. Check if this addon is already active
     final alreadyActive = _myAddons.any(
       (a) => a.addonId == addon.id && a.isActive,
     );
-
     if (alreadyActive) {
       final existing = _myAddons.firstWhere(
         (a) => a.addonId == addon.id && a.isActive,
@@ -251,7 +413,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
       return;
     }
 
-    // 3. Confirm dialog with pricing info
     final typeLabel = addon.type == 'per_day' ? '1 Day' : '1 Month';
     final confirmed = await showDialog<bool>(
       context: context,
@@ -281,7 +442,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
               ),
             ],
             const SizedBox(height: 12),
-            // Show popup city restriction note from PDF
             if (addon.name.toLowerCase().contains('popup'))
               Container(
                 padding: const EdgeInsets.all(10),
@@ -335,23 +495,29 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    // 4. Call API
     setState(() => _purchasingAddonId = addon.id);
 
     try {
-      final result = await StoreApiService.purchaseAddon(addon.id);
+      final String addonType = addon.name.toLowerCase().contains('popup')
+          ? 'popup'
+          : 'offer';
+      final int durationDays = addon.type == 'per_day' ? 1 : 30;
+
+      await StoreApiService.purchaseAddon(
+        addonType: addonType,
+        title: '${addon.name} Plan',
+        description: addon.description ?? 'No description',
+        days: durationDays,
+        bannerImage: null,
+      );
 
       if (!mounted) return;
 
-      // 5. Refresh my-addons list to show updated status
       final updatedAddons = await StoreApiService.getMyAddons();
       if (!mounted) return;
 
       setState(() => _myAddons = updatedAddons);
-
-      _showSnack(
-        '${addon.name} activated until ${_formatDate(result.expiry)}!',
-      );
+      _showSnack('${addon.name} activated successfully!');
     } on ApiException catch (e) {
       if (mounted) _showSnack(e.message, isError: true);
     } catch (e) {
@@ -364,6 +530,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   void _showSnack(String msg, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -403,11 +570,9 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   int? get _currentPlanId => _store?.subscriptionPlanId;
   bool get _isSubscriptionActive => _store?.isSubscriptionActive ?? false;
 
-  // Check if a specific addon is currently active (for badge display)
   bool _isAddonActive(int addonId) =>
       _myAddons.any((a) => a.addonId == addonId && a.isActive);
 
-  // Get active addon expiry for display
   StoreActiveAddonModel? _getActiveAddon(int addonId) {
     try {
       return _myAddons.firstWhere((a) => a.addonId == addonId && a.isActive);
@@ -726,7 +891,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
             ),
             const SizedBox(height: 14),
 
-            // ── No subscription warning (PDF rule) ───────────────────────────
             if (!_isSubscriptionActive)
               Container(
                 margin: const EdgeInsets.only(bottom: 14),
@@ -1085,7 +1249,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
       icon = Icons.local_offer_outlined;
     }
 
-    // Check if this addon is currently active
     final isActive = _isAddonActive(addon.id);
     final activeAddon = _getActiveAddon(addon.id);
     final isPurchasing = _purchasingAddonId == addon.id;
@@ -1137,7 +1300,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
                     ),
                   ),
                 ],
-                // Show expiry if active
                 if (isActive && activeAddon != null) ...[
                   const SizedBox(height: 6),
                   Row(
@@ -1163,7 +1325,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          // Button: "Active" badge if already purchased, else "Add" button
           isActive
               ? Container(
                   padding: const EdgeInsets.symmetric(

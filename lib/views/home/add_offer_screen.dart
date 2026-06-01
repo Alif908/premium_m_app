@@ -230,7 +230,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
       // Step 2: Open Razorpay
       final options = {
-        'key': 'YOUR_RAZORPAY_KEY_ID', // 🔥 replace with your key
+        'key': 'rzp_test_RpQCDZttUbr3uO',
         'order_id': order.orderId,
         'amount': order.amountPaise,
         'currency': order.currency,

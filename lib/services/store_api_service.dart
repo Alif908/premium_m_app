@@ -1,8 +1,6 @@
 // ============================================================
 // lib/services/store_api_service.dart
-// Partner Store App — Full API Service
-// Approach 2: Instant QR Reward Transfer (PRIMARY)
-// Approach 3: Manual Phone Transfer
+
 // ============================================================
 
 import 'dart:convert';
@@ -17,8 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 // CONFIG
 // ─────────────────────────────────────────────────────────────
 
-// const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
-const String _baseUrl = 'http://192.168.1.3:3030/api';
+const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
+// const String _baseUrl = 'http://192.168.1.8:3030/api';
 const String _tokenKey = 'store_token';
 
 // ─────────────────────────────────────────────────────────────
@@ -580,26 +578,35 @@ class StoreApiService {
   // ADDON PURCHASE
   // ════════════════════════════════════════════════════════════
 
-  /// POST /api/store/purchase-addon
-  static Future<({String message, DateTime expiry})> purchaseAddon(
-    int addonId,
-  ) async {
-    dev.log('🧩 [purchaseAddon] addonId: $addonId', name: 'StoreApiService');
-    final data = await _request(
-      method: 'POST',
-      endpoint: '/store/purchase-addon',
-      body: {'addon_id': addonId},
-      requiresAuth: true,
-    );
-    dev.log('📦 [purchaseAddon] raw response: $data', name: 'StoreApiService');
-    final expiry =
-        DateTime.tryParse(data['expiry']?.toString() ?? '') ?? DateTime.now();
-    final message = data['message']?.toString() ?? 'Addon activated';
+  static Future<Map<String, dynamic>> purchaseAddon({
+    required String addonType,
+    required String title,
+    String? description,
+    int? days,
+    File? bannerImage,
+  }) async {
     dev.log(
-      '✅ [purchaseAddon] addonId: $addonId | message: $message | expiry: $expiry',
+      '🧩 [purchaseAddon] type: $addonType | title: $title',
       name: 'StoreApiService',
     );
-    return (message: message, expiry: expiry);
+
+    final fields = <String, String>{
+      'title': title,
+      if (description != null) 'description': description,
+      if (days != null) 'days': days.toString(),
+    };
+
+    final endpoint = addonType == 'popup' ? '/store/pop-up' : '/store/offer';
+
+    final data = await _multipartRequest(
+      method: 'POST',
+      endpoint: endpoint,
+      fields: fields,
+      imageFile: bannerImage,
+    );
+
+    dev.log('📦 [purchaseAddon] raw response: $data', name: 'StoreApiService');
+    return data as Map<String, dynamic>;
   }
 
   // ════════════════════════════════════════════════════════════
@@ -614,13 +621,19 @@ class StoreApiService {
     );
     final data = await _request(
       method: 'GET',
-      endpoint: '/store/my-addons',
+      endpoint: '/store/my-transactions/addons',
       requiresAuth: true,
     );
     dev.log('📦 [getMyAddons] raw response: $data', name: 'StoreApiService');
-    final addons = (data as List)
+
+    final Map<String, dynamic> responseMap = data as Map<String, dynamic>;
+    final List<dynamic> transactionsList =
+        responseMap['transactions'] as List? ?? [];
+
+    final addons = transactionsList
         .map((a) => StoreActiveAddonModel.fromJson(a as Map<String, dynamic>))
         .toList();
+
     dev.log(
       '✅ [getMyAddons] total: ${addons.length} | '
       'active: ${addons.where((a) => a.isActive).length}',
@@ -720,13 +733,19 @@ class StoreApiService {
   // ════════════════════════════════════════════════════════════
 
   /// GET /api/store/transactions?filter=today|week|month
+  // ════════════════════════════════════════════════════════════
+  // TRANSACTION HISTORY
+  // ════════════════════════════════════════════════════════════
+
+  /// GET /api/store/my-transactions/rewards?filter=today|week|month
   static Future<TransactionHistoryResponse> getTransactions({
     String filter = 'today',
   }) async {
     dev.log('📋 [getTransactions] filter: $filter', name: 'StoreApiService');
     final data = await _request(
       method: 'GET',
-      endpoint: '/store/transactions?filter=$filter',
+      // Updated from '/store/transactions' to match your backend route definition ✅
+      endpoint: '/store/my-transactions/rewards?filter=$filter',
       requiresAuth: true,
     );
     dev.log(
