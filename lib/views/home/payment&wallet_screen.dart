@@ -5,7 +5,7 @@ import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PaymentsWalletScreen — fully API-integrated with Razorpay subscription flow
+// PaymentsWalletScreen — Wallet + Subscription Plans + Add-ons
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PaymentsWalletScreen extends StatefulWidget {
@@ -22,16 +22,12 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
   List<SubscriptionPlanModel> _plans = [];
   List<SubscriptionAddonModel> _addons = [];
-  List<StoreActiveAddonModel> _myAddons = [];
   double _walletBalance = 0.0;
 
   StoreModel? _store;
 
   // Which plan_id is currently being purchased (shows loading on that button)
   int? _purchasingPlanId;
-
-  // Which addon_id is currently being purchased
-  int? _purchasingAddonId;
 
   // ── Razorpay ───────────────────────────────────────────────────────────────
   late Razorpay _razorpay;
@@ -45,7 +41,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   void initState() {
     super.initState();
 
-    // Razorpay setup
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
@@ -94,7 +89,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
         name: 'PaymentsWalletScreen',
       );
 
-      // Refresh everything so UI reflects new subscription
       await _loadData();
 
       if (mounted) {
@@ -168,30 +162,15 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     try {
       final results = await Future.wait([
         StoreApiService.getPlans(),
-        StoreApiService.getAddons(),
         StoreApiService.getProfile(),
+        StoreApiService.getAddons(),
       ]);
-
-      List<StoreActiveAddonModel> myAddons = [];
-      try {
-        myAddons = await StoreApiService.getMyAddons();
-        dev.log(
-          '✅ [_loadData] getMyAddons success: ${myAddons.length}',
-          name: 'PaymentsWalletScreen',
-        );
-      } catch (e) {
-        dev.log(
-          '⚠️ [_loadData] getMyAddons failed (endpoint may not exist yet): $e',
-          name: 'PaymentsWalletScreen',
-        );
-      }
 
       setState(() {
         _plans = results[0] as List<SubscriptionPlanModel>;
-        _addons = results[1] as List<SubscriptionAddonModel>;
-        _store = results[2] as StoreModel;
-        _myAddons = myAddons;
+        _store = results[1] as StoreModel;
         _walletBalance = _store?.walletBalance ?? 0.0;
+        _addons = results[2] as List<SubscriptionAddonModel>;
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -280,10 +259,9 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     }
   }
 
-  // ── Purchase Plan — FULL RAZORPAY FLOW ────────────────────────────────────
+  // ── Purchase Plan ──────────────────────────────────────────────────────────
 
   Future<void> _purchasePlan(SubscriptionPlanModel plan) async {
-    // Step 1: Confirm dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -338,7 +316,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
     setState(() => _purchasingPlanId = plan.id);
 
     try {
-      // Step 2: Create Razorpay order on backend
       final order = await StoreApiService.createOrder(plan.id);
       _pendingOrder = order;
 
@@ -347,7 +324,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
         name: 'PaymentsWalletScreen',
       );
 
-      // Step 3: Open Razorpay payment sheet
       final options = {
         'key': 'rzp_test_RpQCDZttUbr3uO',
         'order_id': order.orderId,
@@ -363,8 +339,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
       };
 
       _razorpay.open(options);
-
-      // NOTE: Do NOT setState here — result handled in _onPaymentSuccess / _onPaymentError
     } on ApiException catch (e) {
       dev.log(
         '🔴 [_purchasePlan] ApiException: ${e.message}',
@@ -385,145 +359,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
         _showSnack('Something went wrong. Please try again.', isError: true);
         setState(() => _purchasingPlanId = null);
       }
-    }
-  }
-
-  // ── Purchase Addon ─────────────────────────────────────────────────────────
-
-  Future<void> _purchaseAddon(SubscriptionAddonModel addon) async {
-    if (!(_store?.isSubscriptionActive ?? false)) {
-      _showSnack(
-        'Active subscription required to purchase add-ons',
-        isError: true,
-      );
-      return;
-    }
-
-    final alreadyActive = _myAddons.any(
-      (a) => a.addonId == addon.id && a.isActive,
-    );
-    if (alreadyActive) {
-      final existing = _myAddons.firstWhere(
-        (a) => a.addonId == addon.id && a.isActive,
-      );
-      _showSnack(
-        '${addon.name} already active until ${existing.formattedExpiry}',
-        isError: true,
-      );
-      return;
-    }
-
-    final typeLabel = addon.type == 'per_day' ? '1 Day' : '1 Month';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Purchase ${addon.name}?',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '₹${addon.price.toStringAsFixed(0)} · Valid for $typeLabel',
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFFEC4899),
-              ),
-            ),
-            if (addon.description != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                addon.description!,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF555555)),
-              ),
-            ],
-            const SizedBox(height: 12),
-            if (addon.name.toLowerCase().contains('popup'))
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: Color(0xFFFF9800),
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Only one popup allowed per city at a time.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF555555),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Color(0xFF8E8E8E)),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Purchase',
-              style: TextStyle(
-                color: Color(0xFFEC4899),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _purchasingAddonId = addon.id);
-
-    try {
-      final String addonType = addon.name.toLowerCase().contains('popup')
-          ? 'popup'
-          : 'offer';
-      final int durationDays = addon.type == 'per_day' ? 1 : 30;
-
-      await StoreApiService.purchaseAddon(
-        addonType: addonType,
-        title: '${addon.name} Plan',
-        description: addon.description ?? 'No description',
-        days: durationDays,
-        bannerImage: null,
-      );
-
-      if (!mounted) return;
-
-      final updatedAddons = await StoreApiService.getMyAddons();
-      if (!mounted) return;
-
-      setState(() => _myAddons = updatedAddons);
-      _showSnack('${addon.name} activated successfully!');
-    } on ApiException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
-    } catch (e) {
-      if (mounted) _showSnack('Something went wrong', isError: true);
-    } finally {
-      if (mounted) setState(() => _purchasingAddonId = null);
     }
   }
 
@@ -570,17 +405,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
   int? get _currentPlanId => _store?.subscriptionPlanId;
   bool get _isSubscriptionActive => _store?.isSubscriptionActive ?? false;
 
-  bool _isAddonActive(int addonId) =>
-      _myAddons.any((a) => a.addonId == addonId && a.isActive);
-
-  StoreActiveAddonModel? _getActiveAddon(int addonId) {
-    try {
-      return _myAddons.firstWhere((a) => a.addonId == addonId && a.isActive);
-    } catch (_) {
-      return null;
-    }
-  }
-
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -590,6 +414,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Stack(
@@ -617,6 +442,8 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
                 ],
               ),
             ),
+
+            // Body
             Expanded(
               child: _loading
                   ? const Center(
@@ -648,7 +475,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
           children: [
             const SizedBox(height: 8),
 
-            // ── Wallet Balance ────────────────────────────────────────────────
+            // ── Wallet Balance ──────────────────────────────────────────────
             _buildCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -735,7 +562,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
             const SizedBox(height: 16),
 
-            // ── Current Plan card ─────────────────────────────────────────────
+            // ── Current Plan ────────────────────────────────────────────────
             _buildCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -838,7 +665,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Available Plans ───────────────────────────────────────────────
+            // ── Available Plans ─────────────────────────────────────────────
             const Text(
               'Available Plans',
               style: TextStyle(
@@ -880,7 +707,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Add-ons ───────────────────────────────────────────────────────
+            // ── Add-ons ─────────────────────────────────────────────────────
             const Text(
               'Add-ons',
               style: TextStyle(
@@ -890,43 +717,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
               ),
             ),
             const SizedBox(height: 14),
-
-            if (!_isSubscriptionActive)
-              Container(
-                margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: const Color(0xFFFF9800).withOpacity(0.4),
-                    width: 1.2,
-                  ),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      color: Color(0xFFFF9800),
-                      size: 18,
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Purchase a subscription plan first to activate add-ons.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF555555),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
 
             if (_addons.isEmpty)
               const Center(
@@ -942,7 +732,7 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
               ..._addons.map(
                 (addon) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildAddonCard(addon: addon),
+                  child: _buildAddonCard(addon),
                 ),
               ),
 
@@ -1030,6 +820,61 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
           color: Color(0xFF555555),
           fontWeight: FontWeight.w400,
         ),
+      ),
+    );
+  }
+
+  Widget _buildAddonCard(SubscriptionAddonModel addon) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFEC4899).withOpacity(0.08),
+            blurRadius: 20,
+            spreadRadius: 4,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFDF0F4),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.extension_outlined,
+              color: Color(0xFFEC4899),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              addon.name,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1a1a1a),
+              ),
+            ),
+          ),
+          Text(
+            '₹${addon.price.toStringAsFixed(0)}',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFFEC4899),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1234,158 +1079,6 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
             ),
           ),
       ],
-    );
-  }
-
-  Widget _buildAddonCard({required SubscriptionAddonModel addon}) {
-    IconData icon = Icons.extension_outlined;
-    if (addon.name.toLowerCase().contains('flare')) {
-      icon = Icons.bolt_rounded;
-    } else if (addon.name.toLowerCase().contains('product')) {
-      icon = Icons.inventory_2_outlined;
-    } else if (addon.name.toLowerCase().contains('popup')) {
-      icon = Icons.campaign_outlined;
-    } else if (addon.name.toLowerCase().contains('offer')) {
-      icon = Icons.local_offer_outlined;
-    }
-
-    final isActive = _isAddonActive(addon.id);
-    final activeAddon = _getActiveAddon(addon.id);
-    final isPurchasing = _purchasingAddonId == addon.id;
-    final typeLabel = addon.type == 'per_day' ? '/day' : '/month';
-
-    return _buildCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFDF0F4),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: const Color(0xFFEC4899), size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  addon.name,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1a1a1a),
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '₹${addon.price.toStringAsFixed(0)}$typeLabel',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFFEC4899),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (addon.description != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    addon.description!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF999999),
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ],
-                if (isActive && activeAddon != null) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.check_circle_outline,
-                        size: 13,
-                        color: Color(0xFF22C55E),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Active · Expires ${activeAddon.formattedExpiry}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF22C55E),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          isActive
-              ? Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F8EF),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFF22C55E).withOpacity(0.4),
-                      width: 1.2,
-                    ),
-                  ),
-                  child: const Text(
-                    'Active',
-                    style: TextStyle(
-                      color: Color(0xFF22C55E),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                )
-              : GestureDetector(
-                  onTap: isPurchasing ? null : () => _purchaseAddon(addon),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFFF48FB1),
-                          Color(0xFFF8BBD0),
-                          Color(0xFFFFF5F8),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: isPurchasing
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Add',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                  ),
-                ),
-        ],
-      ),
     );
   }
 }

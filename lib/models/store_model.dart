@@ -22,7 +22,7 @@ class StoreModel {
   final String city;
   final String? shopImage;
   final String? idProof;
-  final String status; 
+  final String status;
   final String subscriptionStatus; // "inactive" | "active" | "expired"
   final int? subscriptionPlanId;
   final DateTime? subscriptionExpiry;
@@ -68,7 +68,8 @@ class StoreModel {
       shopImage: json['shop_image']?.toString(),
       idProof: json['id_proof']?.toString(),
       status: json['status']?.toString() ?? 'pending',
-      subscriptionStatus: json['subscription_status']?.toString() ?? 'inactive',
+      subscriptionStatus:
+          json['subscription_status']?.toString() ?? 'inactive',
       subscriptionPlanId: _parseInt(json['subscription_plan_id']),
       subscriptionExpiry: _parseDate(json['subscription_expiry']),
       walletBalance: _parseDouble(json['wallet_balance']),
@@ -230,7 +231,7 @@ class SubscriptionAddonModel {
 
 // ─────────────────────────────────────────────────────────────
 // STORE ACTIVE ADDON MODEL
-// Source: GET /api/store/my-addons → [...]
+// Source: GET /api/store/my-transactions/addons → { transactions: [...] }
 // ─────────────────────────────────────────────────────────────
 
 class StoreActiveAddonModel {
@@ -290,18 +291,8 @@ class StoreActiveAddonModel {
   String get formattedExpiry {
     const months = [
       '',
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return '${months[expiryDate.month]} ${expiryDate.day}, ${expiryDate.year}';
   }
@@ -347,7 +338,7 @@ class RazorpayOrderModel {
 
 // ─────────────────────────────────────────────────────────────
 // RAZORPAY OFFER ORDER MODEL
-// Source: POST /api/store/purchase-offer
+// Source: POST /api/store/offer (multipart)
 // → { order, addon, total_price, offer_data: { title, description, days, banner } }
 // ─────────────────────────────────────────────────────────────
 
@@ -403,8 +394,74 @@ class RazorpayOfferOrderModel {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RAZORPAY POPUP ORDER MODEL
+// Source: POST /api/store/pop-up (multipart)
+// → { order, addon, total_price, popup_data: { title, banner } }
+//
+// NOTE: Popup is always 1 day. Backend may return popup_data or offer_data
+//       key — both are handled in fromJson.
+// ─────────────────────────────────────────────────────────────
+
+class RazorpayPopupOrderModel {
+  final String orderId;
+  final int amountPaise;
+  final String currency;
+  final String receipt;
+  final double totalPrice;
+  final double addonPricePerDay;
+  final String popupTitle;
+  final String popupDescription;
+  final int days;
+  final String? banner;
+
+  const RazorpayPopupOrderModel({
+    required this.orderId,
+    required this.amountPaise,
+    required this.currency,
+    required this.receipt,
+    required this.totalPrice,
+    required this.addonPricePerDay,
+    required this.popupTitle,
+    required this.popupDescription,
+    required this.days,
+    this.banner,
+  });
+
+  factory RazorpayPopupOrderModel.fromJson(Map<String, dynamic> json) {
+    _log('RazorpayPopupOrderModel.fromJson → raw: $json');
+
+    final order = json['order'] as Map<String, dynamic>;
+
+    // Backend returns popup_data; fallback to offer_data just in case
+    final popupData =
+        (json['popup_data'] ?? json['offer_data']) as Map<String, dynamic>? ??
+        {};
+
+    final addon = json['addon'] as Map<String, dynamic>? ?? {};
+
+    return RazorpayPopupOrderModel(
+      orderId: order['id']?.toString() ?? '',
+      amountPaise: order['amount'] ?? 0,
+      currency: order['currency']?.toString() ?? 'INR',
+      receipt: order['receipt']?.toString() ?? '',
+      totalPrice: _parseDouble(json['total_price']),
+      addonPricePerDay: _parseDouble(addon['price']),
+      popupTitle: popupData['title']?.toString() ?? '',
+      popupDescription: popupData['description']?.toString() ?? '',
+      days: _parseInt(popupData['days']) ?? 1,
+      banner: popupData['banner']?.toString(),
+    );
+  }
+
+  double get amountRupees => amountPaise / 100;
+  String get formattedTotalPrice => '₹${totalPrice.toStringAsFixed(0)}';
+  String get formattedPerDay => '₹${addonPricePerDay.toStringAsFixed(0)}/day';
+}
+
+// ─────────────────────────────────────────────────────────────
 // OFFER MODEL (Flares)
 // Source: GET /api/store/offer-list → [...]
+//         POST /api/store/offer/verify-payment → { offer: {...} }
 // ─────────────────────────────────────────────────────────────
 
 class OfferModel {
@@ -471,6 +528,84 @@ class OfferModel {
     );
     return expiry.difference(today).inDays;
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// POPUP MODEL
+// Source: POST /api/store/pop-up/verify-payment → { popup: {...} }
+//         Matches Popup Sequelize model (table: popups)
+// ─────────────────────────────────────────────────────────────
+
+class PopupModel {
+  final int id;
+  final int storeId;
+  final int addonId;
+  final String city;
+  final String title;
+  final String? banner;
+  final double addonPrice;
+  final DateTime? startDate;
+  final DateTime? expiryDate;
+  final bool isActive;
+  final DateTime? createdAt;
+
+  const PopupModel({
+    required this.id,
+    required this.storeId,
+    required this.addonId,
+    required this.city,
+    required this.title,
+    this.banner,
+    required this.addonPrice,
+    this.startDate,
+    this.expiryDate,
+    required this.isActive,
+    this.createdAt,
+  });
+
+  factory PopupModel.fromJson(Map<String, dynamic> json) {
+    _log('PopupModel.fromJson → raw: $json');
+    return PopupModel(
+      id: json['id'] ?? 0,
+      storeId: json['store_id'] ?? 0,
+      addonId: json['addon_id'] ?? 0,
+      city: json['city']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      banner: json['banner']?.toString(),
+      addonPrice: _parseDouble(json['addon_price']),
+      startDate: _parseDate(json['start_date']),
+      expiryDate: _parseDate(json['expiry_date']),
+      isActive: json['is_active'] != false,
+      createdAt: _parseDate(json['createdAt']),
+    );
+  }
+
+  bool get isExpired {
+    if (expiryDate == null) return false;
+    return expiryDate!.isBefore(DateTime.now());
+  }
+
+  int get hoursLeft {
+    if (expiryDate == null) return 0;
+    final diff = expiryDate!.difference(DateTime.now()).inHours;
+    return diff < 0 ? 0 : diff;
+  }
+
+  String get formattedExpiry {
+    if (expiryDate == null) return '';
+    const months = [
+      '',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final h = expiryDate!.hour;
+    final m = expiryDate!.minute.toString().padLeft(2, '0');
+    final period = h >= 12 ? 'PM' : 'AM';
+    final displayH = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    return '${months[expiryDate!.month]} ${expiryDate!.day}, ${expiryDate!.year} · $displayH:$m $period';
+  }
+
+  String get formattedPrice => '₹${addonPrice.toStringAsFixed(0)}';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -577,7 +712,8 @@ class ScanTransactionModel {
   }
 
   String get formattedRewardPoints => '₹${rewardPoints.toStringAsFixed(2)}';
-  String get formattedPurchaseAmount => '₹${purchaseAmount.toStringAsFixed(2)}';
+  String get formattedPurchaseAmount =>
+      '₹${purchaseAmount.toStringAsFixed(2)}';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -621,7 +757,7 @@ class ManualTransferResultModel {
 
 // ─────────────────────────────────────────────────────────────
 // STORE TRANSACTION MODEL
-// Source: GET /api/store/transactions
+// Source: GET /api/store/my-transactions/rewards
 // ─────────────────────────────────────────────────────────────
 
 class StoreTransactionModel {
@@ -648,7 +784,8 @@ class StoreTransactionModel {
   factory StoreTransactionModel.fromJson(Map<String, dynamic> json) {
     _log('StoreTransactionModel.fromJson → raw: $json');
     final userJson = json['User'] as Map<String, dynamic>?;
-    final name = userJson?['name']?.toString() ?? json['user_name']?.toString();
+    final name =
+        userJson?['name']?.toString() ?? json['user_name']?.toString();
     return StoreTransactionModel(
       id: json['id'] ?? 0,
       userId: json['user_id'] ?? 0,
@@ -719,7 +856,7 @@ class StoreTransactionModel {
 
 // ─────────────────────────────────────────────────────────────
 // TRANSACTION HISTORY RESPONSE
-// Source: GET /api/store/transactions
+// Source: GET /api/store/my-transactions/rewards
 // ─────────────────────────────────────────────────────────────
 
 class TransactionHistoryResponse {

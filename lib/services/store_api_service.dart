@@ -1,12 +1,10 @@
 // ============================================================
 // lib/services/store_api_service.dart
-
 // ============================================================
 
 import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:io';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,8 +13,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 // CONFIG
 // ─────────────────────────────────────────────────────────────
 
-const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
-// const String _baseUrl = 'http://192.168.1.8:3030/api';
+// const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
+const String _baseUrl = 'http://192.168.1.5:3030/api';
 const String _tokenKey = 'store_token';
 
 // ─────────────────────────────────────────────────────────────
@@ -340,8 +338,7 @@ class StoreApiService {
   }
 
   // ════════════════════════════════════════════════════════════
-  // APPROACH 2 — INSTANT QR REWARD TRANSFER  ✅ PRIMARY
-  // POST /api/store/instant-qr-transfer
+  // QR REWARD TRANSFER
   // ════════════════════════════════════════════════════════════
 
   static Future<ScanResultModel> scanQr({
@@ -400,8 +397,7 @@ class StoreApiService {
   }
 
   // ════════════════════════════════════════════════════════════
-  // APPROACH 3 — MANUAL PHONE REWARD TRANSFER
-  // POST /api/store/manual-phone-transfer
+  // MANUAL PHONE REWARD TRANSFER
   // ════════════════════════════════════════════════════════════
 
   static Future<ManualTransferResultModel> manualPhoneTransfer({
@@ -470,7 +466,6 @@ class StoreApiService {
 
   // ════════════════════════════════════════════════════════════
   // LOOKUP USER BY PHONE
-  // GET /api/store/user-by-phone?phone=XXXXXXXXXX
   // ════════════════════════════════════════════════════════════
 
   static Future<int?> getUserIdByPhone(String phone) async {
@@ -575,45 +570,10 @@ class StoreApiService {
   }
 
   // ════════════════════════════════════════════════════════════
-  // ADDON PURCHASE
-  // ════════════════════════════════════════════════════════════
-
-  static Future<Map<String, dynamic>> purchaseAddon({
-    required String addonType,
-    required String title,
-    String? description,
-    int? days,
-    File? bannerImage,
-  }) async {
-    dev.log(
-      '🧩 [purchaseAddon] type: $addonType | title: $title',
-      name: 'StoreApiService',
-    );
-
-    final fields = <String, String>{
-      'title': title,
-      if (description != null) 'description': description,
-      if (days != null) 'days': days.toString(),
-    };
-
-    final endpoint = addonType == 'popup' ? '/store/pop-up' : '/store/offer';
-
-    final data = await _multipartRequest(
-      method: 'POST',
-      endpoint: endpoint,
-      fields: fields,
-      imageFile: bannerImage,
-    );
-
-    dev.log('📦 [purchaseAddon] raw response: $data', name: 'StoreApiService');
-    return data as Map<String, dynamic>;
-  }
-
-  // ════════════════════════════════════════════════════════════
   // MY ACTIVE ADDONS
   // ════════════════════════════════════════════════════════════
 
-  /// GET /api/store/my-addons
+  /// GET /api/store/my-transactions/addons
   static Future<List<StoreActiveAddonModel>> getMyAddons() async {
     dev.log(
       '🧩 [getMyAddons] Fetching active addons...',
@@ -732,11 +692,6 @@ class StoreApiService {
   // TRANSACTION HISTORY
   // ════════════════════════════════════════════════════════════
 
-  /// GET /api/store/transactions?filter=today|week|month
-  // ════════════════════════════════════════════════════════════
-  // TRANSACTION HISTORY
-  // ════════════════════════════════════════════════════════════
-
   /// GET /api/store/my-transactions/rewards?filter=today|week|month
   static Future<TransactionHistoryResponse> getTransactions({
     String filter = 'today',
@@ -744,7 +699,6 @@ class StoreApiService {
     dev.log('📋 [getTransactions] filter: $filter', name: 'StoreApiService');
     final data = await _request(
       method: 'GET',
-      // Updated from '/store/transactions' to match your backend route definition ✅
       endpoint: '/store/my-transactions/rewards?filter=$filter',
       requiresAuth: true,
     );
@@ -770,13 +724,10 @@ class StoreApiService {
 
   // ────────────────────────────────────────────────────────────
   // STEP 1 — CREATE OFFER PURCHASE ORDER
-  // POST /api/store/purchase-offer   (multipart)
-  // Fields : title, description, days
-  // File   : banner (optional)
+  // POST /api/store/offer   (multipart)
   // Returns: { order, addon, total_price, offer_data }
   // ────────────────────────────────────────────────────────────
 
-  /// Step 1: Send offer details + banner → get Razorpay order back
   static Future<RazorpayOfferOrderModel> purchaseOffer({
     required String title,
     required String description,
@@ -819,13 +770,9 @@ class StoreApiService {
 
   // ────────────────────────────────────────────────────────────
   // STEP 2 — VERIFY OFFER PURCHASE
-  // POST /api/store/verify-offer-purchase   (JSON)
-  // Body: razorpay_order_id, razorpay_payment_id, razorpay_signature,
-  //       title, description, days, banner (filename from step 1)
-  // Returns: { message, offer }
+  // POST /api/store/offer/verify-payment
   // ────────────────────────────────────────────────────────────
 
-  /// Step 2: After Razorpay success → verify + create offer on backend
   static Future<OfferModel> verifyOfferPurchase({
     required String razorpayOrderId,
     required String razorpayPaymentId,
@@ -874,9 +821,120 @@ class StoreApiService {
     return offer;
   }
 
+  // ════════════════════════════════════════════════════════════
+  // POPUPS
+  // ════════════════════════════════════════════════════════════
+
+  // ────────────────────────────────────────────────────────────
+  // STEP 1 — CREATE POPUP PURCHASE ORDER
+  // POST /api/store/pop-up   (multipart)
+  //
+  // Backend ഇതു return ചെയ്യും:
+  // { order, addon, total_price, popup_data: { title, banner } }
+  //
+  // NOTE: Popup is fixed 1-day, no `days` field needed.
+  //       Backend checks city exclusivity before creating order.
+  // ────────────────────────────────────────────────────────────
+
+  static Future<RazorpayPopupOrderModel> purchasePopup({
+    required String title,
+    String? description,
+    int days = 1,
+    File? bannerImage,
+  }) async {
+    dev.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', name: 'StoreApiService');
+    dev.log('🎯 [purchasePopup] title: $title', name: 'StoreApiService');
+
+    final fields = <String, String>{
+      'title': title,
+      if (description != null && description.isNotEmpty)
+        'description': description,
+      'days': days.toString(),
+    };
+
+    final data = await _multipartRequest(
+      method: 'POST',
+      endpoint: '/store/pop-up',
+      fields: fields,
+      imageFile: bannerImage,
+    );
+
+    dev.log('📦 [purchasePopup] raw response: $data', name: 'StoreApiService');
+
+    final result = RazorpayPopupOrderModel.fromJson(
+      data as Map<String, dynamic>,
+    );
+
+    dev.log(
+      '✅ [purchasePopup] orderId: ${result.orderId} | totalPrice: ₹${result.totalPrice}',
+      name: 'StoreApiService',
+    );
+    dev.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', name: 'StoreApiService');
+
+    return result;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // STEP 2 — VERIFY POPUP PURCHASE
+  // POST /api/store/pop-up/verify-payment   (JSON)
+  //
+  // Body: razorpay_order_id, razorpay_payment_id, razorpay_signature,
+  //       title, banner (filename from step 1)
+  // Returns: { message, popup }
+  //
+  // NOTE: Backend re-checks city exclusivity here too (race-condition safe).
+  // ────────────────────────────────────────────────────────────
+
+  static Future<PopupModel> verifyPopupPurchase({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required String title,
+    String? description,
+    int days = 1,
+    String? banner,
+  }) async {
+    dev.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', name: 'StoreApiService');
+    dev.log(
+      '✅ [verifyPopupPurchase] orderId: $razorpayOrderId | banner: $banner',
+      name: 'StoreApiService',
+    );
+
+    final body = <String, dynamic>{
+      'razorpay_order_id': razorpayOrderId,
+      'razorpay_payment_id': razorpayPaymentId,
+      'razorpay_signature': razorpaySignature,
+      'title': title,
+      if (description != null && description.isNotEmpty)
+        'description': description,
+      if (banner != null) 'banner': banner,
+    };
+
+    final data = await _request(
+      method: 'POST',
+      endpoint: '/store/pop-up/verify-payment',
+      body: body,
+      requiresAuth: true,
+    );
+
+    dev.log(
+      '📦 [verifyPopupPurchase] raw response: $data',
+      name: 'StoreApiService',
+    );
+
+    final popup = PopupModel.fromJson(data['popup'] as Map<String, dynamic>);
+
+    dev.log(
+      '✅ [verifyPopupPurchase] popupId: ${popup.id} | title: ${popup.title}',
+      name: 'StoreApiService',
+    );
+    dev.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', name: 'StoreApiService');
+
+    return popup;
+  }
+
   // ────────────────────────────────────────────────────────────
   // GET OFFERS
-  // GET /api/store/offer-list
   // ────────────────────────────────────────────────────────────
 
   /// GET /api/store/offer-list

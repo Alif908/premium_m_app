@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 import 'package:premium_m_app/views/home/add_offer_screen.dart';
+import 'package:premium_m_app/views/home/add_pop_screen.dart';
 import 'package:premium_m_app/views/home/history_screen.dart';
 import 'package:premium_m_app/views/home/payment&wallet_screen.dart';
 import 'package:premium_m_app/views/home/profile_page.dart';
@@ -104,6 +105,17 @@ class _HomePageState extends State<HomePage> {
                       MaterialPageRoute(builder: (_) => CreateOfferScreen()),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _QuickActionTile(
+                    icon: Icons.add,
+                    title: 'Add Popup',
+                    subtitle: 'Create popup campaign',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => CreatePopupScreen()),
+                    ),
+                  ),
+
                   const SizedBox(height: 12),
                   _QuickActionTile(
                     icon: Icons.history_rounded,
