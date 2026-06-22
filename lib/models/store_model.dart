@@ -68,8 +68,7 @@ class StoreModel {
       shopImage: json['shop_image']?.toString(),
       idProof: json['id_proof']?.toString(),
       status: json['status']?.toString() ?? 'pending',
-      subscriptionStatus:
-          json['subscription_status']?.toString() ?? 'inactive',
+      subscriptionStatus: json['subscription_status']?.toString() ?? 'inactive',
       subscriptionPlanId: _parseInt(json['subscription_plan_id']),
       subscriptionExpiry: _parseDate(json['subscription_expiry']),
       walletBalance: _parseDouble(json['wallet_balance']),
@@ -291,8 +290,18 @@ class StoreActiveAddonModel {
   String get formattedExpiry {
     const months = [
       '',
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[expiryDate.month]} ${expiryDate.day}, ${expiryDate.year}';
   }
@@ -595,8 +604,18 @@ class PopupModel {
     if (expiryDate == null) return '';
     const months = [
       '',
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final h = expiryDate!.hour;
     final m = expiryDate!.minute.toString().padLeft(2, '0');
@@ -712,8 +731,7 @@ class ScanTransactionModel {
   }
 
   String get formattedRewardPoints => '₹${rewardPoints.toStringAsFixed(2)}';
-  String get formattedPurchaseAmount =>
-      '₹${purchaseAmount.toStringAsFixed(2)}';
+  String get formattedPurchaseAmount => '₹${purchaseAmount.toStringAsFixed(2)}';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -783,9 +801,13 @@ class StoreTransactionModel {
 
   factory StoreTransactionModel.fromJson(Map<String, dynamic> json) {
     _log('StoreTransactionModel.fromJson → raw: $json');
-    final userJson = json['User'] as Map<String, dynamic>?;
+    final userJson =
+        json['user'] as Map<String, dynamic>? ??
+        json['User'] as Map<String, dynamic>?;
     final name =
-        userJson?['name']?.toString() ?? json['user_name']?.toString();
+        userJson?['name']?.toString() ??
+        userJson?['phone']?.toString() ??
+        json['user_name']?.toString();
     return StoreTransactionModel(
       id: json['id'] ?? 0,
       userId: json['user_id'] ?? 0,
@@ -874,14 +896,18 @@ class TransactionHistoryResponse {
 
   factory TransactionHistoryResponse.fromJson(Map<String, dynamic> json) {
     _log('TransactionHistoryResponse.fromJson → raw keys: ${json.keys}');
+
     final list = (json['transactions'] as List? ?? [])
         .map((t) => StoreTransactionModel.fromJson(t as Map<String, dynamic>))
         .toList();
+
+    final summary = json['summary'] as Map<String, dynamic>? ?? {};
+
     return TransactionHistoryResponse(
       transactions: list,
-      totalAmount: _parseDouble(json['total_amount']),
-      totalPoints: _parseDouble(json['total_points']),
-      count: _parseInt(json['count']) ?? list.length,
+      totalAmount: _parseDouble(summary['total_purchase_amount']),
+      totalPoints: _parseDouble(summary['total_rewards_given']),
+      count: _parseInt(summary['total_transactions']) ?? list.length,
     );
   }
 

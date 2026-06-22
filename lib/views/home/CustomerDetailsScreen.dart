@@ -1,27 +1,10 @@
-// ============================================================
-// lib/views/home/CustomerDetailsScreen.dart
-//
-// Used by Approach 1 (QR + phone lookup) and Approach 2 (instant QR).
-// NOT used by Approach 3 — that flows entirely inside QRScannerScreen.
-//
-// Flow:
-//   1. Receives userId from QRScannerScreen (already resolved)
-//   2. No pre-fetch of user profile — avoids a wasted round-trip
-//   3. Store owner enters purchase amount
-//   4. "Confirm & Add Points" → StoreApiService.scanQr()
-//        POST /store/instant-qr-transfer
-//        body: { qr_data: { user_id }, purchase_amount }
-//   5. Response → ScanResultModel → success overlay → auto-pop after 3s
-//
-// ============================================================
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
+import 'package:premium_m_app/views/home/home_page.dart';
 
 class CustomerDetailsScreen extends StatefulWidget {
-  /// userId resolved from QR scan (Approach 2) or phone lookup (Approach 1)
   final int userId;
 
   const CustomerDetailsScreen({super.key, required this.userId});
@@ -127,9 +110,15 @@ class _CustomerDetailsScreenState extends State<CustomerDetailsScreen>
 
       _successCtrl.forward();
 
-      // Auto-pop after 3 seconds → QRScannerScreen resumes scanning
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) Navigator.of(context).maybePop();
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const HomePage(), // OR HomePage
+          ),
+          (route) => false,
+        );
       });
     } on ApiException catch (e) {
       debugPrint(

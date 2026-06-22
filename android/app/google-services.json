@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "713808133886",
+    "project_id": "clubindia-rewards",
+    "storage_bucket": "clubindia-rewards.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:713808133886:android:81da8db49d4d163c142faf",
+        "android_client_info": {
+          "package_name": "com.example.premium_m_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDqPXwkF6_CIVSYhWZ8iUgVrC-BWmnctiQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

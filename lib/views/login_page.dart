@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
+import 'package:premium_m_app/views/home/legal%20pages/privacy_screen.dart';
+import 'package:premium_m_app/views/home/legal%20pages/terms_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'otp_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -13,6 +17,16 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _phoneController = TextEditingController();
   bool _isLoading = false;
+
+  // ── Terms & Conditions consent ─────────────────────────────
+  bool _agreed = false;
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   void _sendOtp() async {
     final phone = _phoneController.text.trim();
@@ -31,15 +45,12 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       // DEV MODE: backend returns OTP in response
-      final String? devOtp = result['otp']?.toString(); // ← extract OTP
+      final String? devOtp = result['otp']?.toString();
 
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => OtpPage(
-            phoneNumber: phone,
-            devOtp: devOtp, // ← pass to OtpPage for digit-by-digit auto-fill
-          ),
+          builder: (_) => OtpPage(phoneNumber: phone, devOtp: devOtp),
         ),
       );
     } on ApiException catch (e) {
@@ -49,6 +60,38 @@ class _LoginPageState extends State<LoginPage> {
       ).showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkLocation();
+    });
+  }
+
+  Future<void> _checkLocation() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled && mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Location Required'),
+          content: const Text('Please turn on your location to continue.'),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await Geolocator.openLocationSettings();
+              },
+              child: const Text('Enable Location'),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -80,29 +123,29 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   const SizedBox(height: 40),
                   Container(
-                    width: 90,
-                    height: 90,
+                    width: 200,
+                    height: 110,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(22),
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFFF48FB1),
-                          Color(0xFFF8BBD0),
-                          Color(0xFFFFF5F8),
-                        ],
-                      ),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFF8BBD0).withOpacity(0.4),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
                     ),
-                    child: const Icon(
-                      Icons.smartphone_rounded,
-                      color: Colors.white,
-                      size: 42,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Image.asset(
+                        'assets/logo/bada store pr.jpg',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 28),
                   const Text(
-                    'ClubIndia Partner',
+                    'Badacoin.connect',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
@@ -187,28 +230,132 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                         ),
+
+                        // ── Terms & Conditions Consent ─────────────
+                        const SizedBox(height: 16),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Checkbox(
+                                value: _agreed,
+                                activeColor: const Color(0xFFFF4D94),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _agreed = value ?? false;
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF666666),
+                                    height: 1.4,
+                                  ),
+                                  children: [
+                                    const TextSpan(text: 'I agree to the '),
+                                    WidgetSpan(
+                                      alignment: PlaceholderAlignment.middle,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const TermsAndConditionsPage(),
+                                            ),
+                                          );
+                                        },
+                                        child: const Text(
+                                          'Terms & Conditions',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFFFF4D94),
+                                            fontWeight: FontWeight.w600,
+                                            decoration:
+                                                TextDecoration.underline,
+                                            decorationColor: Color(0xFFFF4D94),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const TextSpan(text: ' and '),
+                                    WidgetSpan(
+                                      alignment: PlaceholderAlignment.middle,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const PrivacyPolicyPage(),
+                                            ),
+                                          );
+                                        },
+                                        child: const Text(
+                                          'Privacy Policy',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFFFF4D94),
+                                            fontWeight: FontWeight.w600,
+                                            decoration:
+                                                TextDecoration.underline,
+                                            decorationColor: Color(0xFFFF4D94),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
                         const SizedBox(height: 20),
+
+                        // ── Send OTP Button ────────────────────────
                         SizedBox(
                           width: double.infinity,
                           height: 56,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(16),
-                              gradient: const LinearGradient(
+                              gradient: LinearGradient(
                                 begin: Alignment.centerLeft,
                                 end: Alignment.centerRight,
-                                colors: [
-                                  Color(0xFFF48FB1),
-                                  Color(0xFFF8BBD0),
-                                  Color(0xFFFFF5F8),
-                                ],
+                                colors: _agreed
+                                    ? const [
+                                        Color(0xFFF48FB1),
+                                        Color(0xFFF8BBD0),
+                                        Color(0xFFFFF5F8),
+                                      ]
+                                    : const [
+                                        Color(0xFFDDDDDD),
+                                        Color(0xFFEEEEEE),
+                                        Color(0xFFF5F5F5),
+                                      ],
                               ),
                             ),
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : _sendOtp,
+                              onPressed: (_isLoading || !_agreed)
+                                  ? null
+                                  : _sendOtp,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.transparent,
                                 shadowColor: Colors.transparent,
+                                disabledBackgroundColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
@@ -222,12 +369,14 @@ class _LoginPageState extends State<LoginPage> {
                                         strokeWidth: 2.5,
                                       ),
                                     )
-                                  : const Text(
+                                  : Text(
                                       'Send OTP',
                                       style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.white,
+                                        color: _agreed
+                                            ? Colors.white
+                                            : const Color(0xFFAAAAAA),
                                         letterSpacing: 0.3,
                                       ),
                                     ),

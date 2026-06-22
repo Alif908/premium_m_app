@@ -1,22 +1,3 @@
-// lib/screens/create_popup_screen.dart
-//
-// Flow:
-//   1. User fills title, description (optional), banner (optional)
-//   2. Tap "Preview & Pay" → purchasePopup() → Razorpay order created
-//   3. Razorpay payment sheet opens
-//   4. On success → verifyPopupPurchase() → popup created on backend
-//   5. Navigate back with true (caller can refresh)
-//
-// NOTE: Popup is fixed 1-day in this city. Backend enforces city exclusivity.
-//
-// FIXES (v2):
-//   [1] _onPaymentSuccess — signature & orderId validation added.
-//       Razorpay SDK ചിലപ്പോൾ fail ആയാലും SUCCESS event fire ചെയ്യും;
-//       empty signature / orderId mismatch → treat as failure.
-//   [2] _previewAndPay — _razorpay.open() ശേഷം _submitting = false.
-//       Sheet dismiss ചെയ്‌താൽ button stuck ആകാതിരിക്കാൻ.
-//   [3] _onPaymentError / _onExternalWallet — _pendingOrder null check
-//       before setState to avoid unnecessary rebuilds.
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -258,7 +239,6 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
     if (picked != null) setState(() => _bannerFile = File(picked.path));
   }
 
-  // ── Preview & Pay ─────────────────────────────────────────────────────────
 
   Future<void> _previewAndPay() async {
     final title = _titleController.text.trim();
@@ -272,7 +252,6 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
     setState(() => _submitting = true);
 
     try {
-      // Step 1: Upload banner + get Razorpay order from backend
       final order = await StoreApiService.purchasePopup(
         title: title,
         description: desc.isNotEmpty ? desc : null,
@@ -281,7 +260,6 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
 
       _pendingOrder = order;
 
-      // Show price confirmation dialog
       final confirmed = await _showPriceConfirmDialog(order);
       if (!mounted || confirmed != true) {
         _pendingOrder = null;
@@ -289,7 +267,6 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
         return;
       }
 
-      // Open Razorpay payment sheet
       final options = <String, dynamic>{
         'key': 'rzp_test_RpQCDZttUbr3uO',
         'order_id': order.orderId,
@@ -303,9 +280,7 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
 
       _razorpay.open(options);
 
-      // FIX [2]: Sheet open ആയി കഴിഞ്ഞാൽ _submitting false ആക്കുക.
-      // ഇല്ലെങ്കിൽ user sheet dismiss ചെയ്‌താൽ button stuck ആകും.
-      // Success / Error callbacks ആണ് _submitting = true ആക്കേണ്ടത്.
+      
       if (mounted) setState(() => _submitting = false);
     } on ApiException catch (e) {
       _pendingOrder = null;
@@ -322,7 +297,6 @@ class _CreatePopupScreenState extends State<CreatePopupScreen> {
     }
   }
 
-  // ── Price confirmation dialog ─────────────────────────────────────────────
 
   Future<bool?> _showPriceConfirmDialog(RazorpayPopupOrderModel order) {
     return showDialog<bool>(

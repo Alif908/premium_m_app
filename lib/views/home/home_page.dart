@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 import 'package:premium_m_app/views/home/add_offer_screen.dart';
 import 'package:premium_m_app/views/home/add_pop_screen.dart';
 import 'package:premium_m_app/views/home/history_screen.dart';
+import 'package:premium_m_app/views/home/offers_show.dart';
 import 'package:premium_m_app/views/home/payment&wallet_screen.dart';
+import 'package:premium_m_app/views/home/popup_showing_screen.dart';
 import 'package:premium_m_app/views/home/profile_page.dart';
 import 'package:premium_m_app/views/home/qrscanner_screen.dart';
+import 'package:premium_m_app/views/login_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,30 +24,84 @@ class _HomePageState extends State<HomePage> {
   StoreModel? _store;
   bool _isLoading = true;
 
+  // ── Offers preview state ────────────────────────────────────
+  List<OfferModel> _offers = [];
+  bool _offersLoading = true;
+
   @override
   void initState() {
     super.initState();
     _loadStore();
+    _loadOffers();
   }
 
   Future<void> _loadStore() async {
     try {
       final store = await StoreApiService.getProfile();
+
+      if (!mounted) return;
+
       setState(() {
         _store = store;
         _isLoading = false;
       });
-    } catch (e) {
+    } on ApiException catch (e) {
       debugPrint('Error loading store: $e');
-      setState(() {
-        _isLoading = false;
-      });
+
+      if (e.statusCode == 401 && mounted) {
+        debugPrint('🚨 Session Expired');
+        debugPrint('🚪 Redirecting to LoginPage');
+
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+
+        return;
+      }
+
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Failed to load profile')));
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      debugPrint('Unexpected Error: $e');
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
+  }
+
+  // ── Load offers for the preview row on the home page ────────
+  Future<void> _loadOffers() async {
+    if (!mounted) return;
+    setState(() => _offersLoading = true);
+    try {
+      final offers = await StoreApiService.getOffers();
+      if (!mounted) return;
+      setState(() {
+        // Home page only needs a small preview row.
+        _offers = offers.take(5).toList();
+        _offersLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading offers preview: $e');
+      if (!mounted) return;
+      setState(() => _offersLoading = false);
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_loadStore(), _loadOffers()]);
   }
 
   @override
@@ -68,7 +127,7 @@ class _HomePageState extends State<HomePage> {
         ),
         child: SafeArea(
           child: RefreshIndicator(
-            onRefresh: _loadStore,
+            onRefresh: _refreshAll,
             color: const Color(0xFFEC4899),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(
@@ -87,6 +146,51 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 20),
                   _ScanQrCard(),
                   const SizedBox(height: 28),
+
+                  // ── My Offers preview (below Scan QR) ──────
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'My Offers',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A1A1A),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const OffersListScreen(),
+                          ),
+                        ),
+                        child: const Text(
+                          'View All',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFEC4899),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _OffersPreviewRow(
+                    offers: _offers,
+                    isLoading: _offersLoading,
+                    onAddOffer: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => CreateOfferScreen()),
+                      );
+                      _loadOffers();
+                    },
+                  ),
+
+                  const SizedBox(height: 28),
                   const Text(
                     'Quick Actions',
                     style: TextStyle(
@@ -95,17 +199,24 @@ class _HomePageState extends State<HomePage> {
                       color: Color(0xFF1A1A1A),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
+
+                  // ➕ Add Offer (create new)
                   _QuickActionTile(
                     icon: Icons.add,
                     title: 'Add Offer',
                     subtitle: 'Create new promotion',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => CreateOfferScreen()),
-                    ),
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => CreateOfferScreen()),
+                      );
+                      _loadOffers();
+                    },
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
+
+                  // ➕ Add Popup (create new)
                   _QuickActionTile(
                     icon: Icons.add,
                     title: 'Add Popup',
@@ -113,6 +224,38 @@ class _HomePageState extends State<HomePage> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => CreatePopupScreen()),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 📄 Offers (VIEW list of added offers) — FIXED
+                  _QuickActionTile(
+                    icon: Icons.local_offer_rounded,
+                    title: 'Offers',
+                    subtitle: 'View added offers',
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const OffersListScreen(),
+                        ),
+                      );
+                      _loadOffers();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 📄 Popup offer (VIEW list of added popups)
+                  // NOTE: needs PopupListScreen + backend /popup-list (getPopups)
+                  _QuickActionTile(
+                    icon: Icons.campaign_rounded,
+                    title: 'Popup offer',
+                    subtitle: 'View added popup ads',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PopupsListScreen(),
+                      ),
                     ),
                   ),
 
@@ -231,7 +374,6 @@ class _ActiveSubscriptionBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Uses StoreModel.isSubscriptionActive getter
     final isActive = store?.isSubscriptionActive ?? false;
     final label = isActive ? 'Active Subscription' : 'No Active Subscription';
     final color = isActive ? const Color(0xFF34C759) : const Color(0xFFFF9500);
@@ -279,7 +421,6 @@ class _StatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Uses StoreModel.walletBalance, subscriptionStatus, daysLeft getters
     final wallet = store?.walletBalance ?? 0.0;
     final planStatus = store?.subscriptionStatus ?? '-';
     final daysLeft = store?.daysLeft ?? 0;
@@ -495,6 +636,195 @@ class _QrPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── Offers Preview Row (NEW) ────────────────────────────────────────────
+// Mirrors the look of the user app's home offers row: horizontal cards
+// with banner image, gradient fallback, title + status overlay.
+class _OffersPreviewRow extends StatelessWidget {
+  final List<OfferModel> offers;
+  final bool isLoading;
+  final VoidCallback onAddOffer;
+
+  const _OffersPreviewRow({
+    required this.offers,
+    required this.isLoading,
+    required this.onAddOffer,
+  });
+
+  static const List<Color> _fallbackColors = [
+    Color(0xFFF3D6F5),
+    Color(0xFFFFE4CC),
+    Color(0xFFD6EEF8),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const SizedBox(
+        height: 150,
+        child: Center(
+          child: CircularProgressIndicator(color: Color(0xFFEC4899)),
+        ),
+      );
+    }
+
+    if (offers.isEmpty) {
+      return GestureDetector(
+        onTap: onAddOffer,
+        child: Container(
+          width: double.infinity,
+          height: 100,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: const Color(0xFFEC4899).withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_circle_outline, color: Color(0xFFEC4899)),
+                SizedBox(height: 6),
+                Text(
+                  'No offers yet — tap to add one',
+                  style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 150,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: offers.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (context, i) {
+          final offer = offers[i];
+          final bannerUrl = StoreApiService.resolveBannerUrl(offer.banner);
+          final isActive = offer.isActive;
+          final isExpired = offer.isExpired;
+          final fallback = _fallbackColors[i % _fallbackColors.length];
+
+          return GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const OffersListScreen()),
+            ),
+            child: Container(
+              width: 130,
+              decoration: BoxDecoration(
+                color: fallback,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (bannerUrl != null)
+                      Image.network(
+                        bannerUrl,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (_, child, progress) => progress == null
+                            ? child
+                            : const Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFEC4899),
+                                ),
+                              ),
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Icon(
+                            offer.isPopup ? Icons.campaign : Icons.local_offer,
+                            color: const Color(0xFFEC4899),
+                            size: 36,
+                          ),
+                        ),
+                      )
+                    else
+                      Center(
+                        child: Icon(
+                          offer.isPopup ? Icons.campaign : Icons.local_offer,
+                          color: const Color(0xFFEC4899),
+                          size: 36,
+                        ),
+                      ),
+
+                    // Status badge top-right
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isExpired
+                              ? Colors.grey.withOpacity(0.85)
+                              : (isActive
+                                    ? const Color(0xFF34C759).withOpacity(0.9)
+                                    : Colors.grey.withOpacity(0.85)),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          isExpired
+                              ? 'Expired'
+                              : (isActive ? 'Active' : 'Inactive'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Bottom title overlay
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [
+                              Colors.black.withOpacity(0.75),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: Text(
+                          offer.title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _QuickActionTile extends StatelessWidget {

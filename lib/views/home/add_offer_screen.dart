@@ -6,17 +6,6 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CreateOfferScreen — Full Razorpay paid flow
-//
-// Flow:
-//   1. User fills title, description, days, banner
-//   2. Tap "Preview & Pay" → calls purchaseOffer() → Razorpay order created
-//   3. Razorpay payment sheet opens
-//   4. On payment success → calls verifyOfferPurchase() → offer created
-//   5. Navigate back with success
-// ─────────────────────────────────────────────────────────────────────────────
-
 class CreateOfferScreen extends StatefulWidget {
   const CreateOfferScreen({super.key});
 

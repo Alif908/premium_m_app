@@ -1,22 +1,3 @@
-// ============================================================
-// lib/views/home/QRScannerScreen.dart
-//
-// Three reward approaches — all properly connected:
-//
-//   Approach 2 (PRIMARY)   QR scanned → parse userId directly
-//                          → navigate CustomerDetailsScreen(userId, mode: qr)
-//
-//   Approach 1 (CLUBINDIA) QR starts with "CLUBINDIA-{phone}"
-//                          → getUserIdByPhone API
-//                          → if found: CustomerDetailsScreen(userId, mode: qr)
-//                          → if not found: show error, resume scan
-//
-//   Approach 3 (MANUAL)    Store owner types phone + amount inline
-//                          → manualPhoneTransfer() directly
-//                          → ManualSuccessSheet, NO CustomerDetailsScreen
-//
-// ============================================================
-
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -25,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 import 'package:premium_m_app/views/home/CustomerDetailsScreen.dart';
+import 'package:premium_m_app/views/home/home_page.dart';
 
 // ─── Transfer mode passed to CustomerDetailsScreen ──────────
 enum RewardTransferMode { qr }
@@ -204,10 +186,10 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       context,
       MaterialPageRoute(builder: (_) => CustomerDetailsScreen(userId: userId)),
     ).then((_) {
-      debugPrint('🔙 [QRScanner] Returned from CustomerDetailsScreen');
+      // when customer screen closes → return to scanner
       if (mounted) {
-        _unlockScanner();
         _scanner.start();
+        _unlockScanner();
       }
     });
   }
@@ -291,11 +273,12 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       isScrollControlled: true,
       builder: (_) => _ManualSuccessSheet(result: result),
     ).then((_) {
-      // After dismissal, switch back to scanner view
-      if (mounted) {
-        setState(() => _mode = _ScreenMode.scanning);
-        _scanner.start();
-      }
+      if (!mounted) return;
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomePage()),
+        (route) => false,
+      );
     });
   }
 
@@ -991,11 +974,6 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     );
   }
 }
-
-// ══════════════════════════════════════════════════════════════
-// MANUAL SUCCESS BOTTOM SHEET (Approach 3)
-// Shown after manualPhoneTransfer() succeeds
-// ══════════════════════════════════════════════════════════════
 
 class _ManualSuccessSheet extends StatelessWidget {
   final ManualTransferResultModel result;

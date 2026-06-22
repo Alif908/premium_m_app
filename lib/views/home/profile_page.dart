@@ -1,12 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
+import 'package:premium_m_app/views/home/legal%20pages/additional_legal_screen.dart';
+import 'package:premium_m_app/views/home/legal%20pages/privacy_screen.dart';
+import 'package:premium_m_app/views/home/legal%20pages/terms_screen.dart';
 import 'package:premium_m_app/views/login_page.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Base URL for images served from backend /uploads
 // ─────────────────────────────────────────────────────────────
 const String _imageBaseUrl = 'https://coinapi.bestagencyindia.com/uploads/';
+
+// ─────────────────────────────────────────────────────────────
+// URL launcher helper (used by Legal links)
+// ─────────────────────────────────────────────────────────────
+Future<void> _openUrl(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // ProfileSettingsPage
@@ -267,7 +281,11 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
               ),
             ),
 
-            const SizedBox(height: 14),
+            const SizedBox(height: 30),
+
+            // const SizedBox(height: 12),
+            _DeleteAccountButton(),
+            const SizedBox(height: 12),
 
             // ── Logout Button ──────────────────────────────────────────
             const _LogoutButton(),
@@ -326,7 +344,6 @@ class _ProfileHeaderCard extends StatelessWidget {
         ? const Color(0xFFFFE4EE)
         : const Color(0xFFF0F0F0);
 
-    // Build full image URL — backend stores just the filename
     final String? imageUrl =
         (store.shopImage != null && store.shopImage!.isNotEmpty)
         ? '$_imageBaseUrl${store.shopImage}'
@@ -349,7 +366,6 @@ class _ProfileHeaderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Avatar + Name ──────────────────────────────────────────
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -423,7 +439,6 @@ class _ProfileHeaderCard extends StatelessWidget {
           const Divider(color: Color(0xFFF3F3F3), height: 1),
           const SizedBox(height: 16),
 
-          // ── Info Rows ──────────────────────────────────────────────
           if (store.address != null && store.address!.isNotEmpty) ...[
             _InfoRow(
               icon: Icons.location_on_outlined,
@@ -440,7 +455,6 @@ class _ProfileHeaderCard extends StatelessWidget {
             _InfoRow(icon: Icons.mail_outline_rounded, text: store.email!),
           ],
 
-          // ── Expiry Warning ─────────────────────────────────────────
           if (store.isExpiringSoon && store.subscriptionExpiry != null) ...[
             const SizedBox(height: 14),
             Container(
@@ -702,7 +716,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ── Settings Tile Item (used inside grouped card) ─────────────────────────────
+// ── Settings Tile Item ────────────────────────────────────────────────────────
 
 class _SettingsTileItem extends StatelessWidget {
   final IconData icon;
@@ -793,11 +807,21 @@ class _SettingsTileItem extends StatelessWidget {
 class _LinksCard extends StatelessWidget {
   const _LinksCard();
 
+  // ── URL map for each legal link ──────────────────────────────
   static const _links = [
-    (icon: Icons.privacy_tip_outlined, label: 'Privacy Policy'),
-    (icon: Icons.description_outlined, label: 'Terms & Conditions'),
-    (icon: Icons.headset_mic_outlined, label: 'Help & Support'),
-    (icon: Icons.info_outline_rounded, label: 'About ClubIndia'),
+    (icon: Icons.privacy_tip_outlined, label: 'Privacy Policy', url: ''),
+    (icon: Icons.description_outlined, label: 'Terms & Conditions', url: ''),
+    (icon: Icons.gavel_outlined, label: 'Additional Legal Policies', url: ''),
+    (
+      icon: Icons.headset_mic_outlined,
+      label: 'Help & Support',
+      url: 'mailto:Bestagencyindia2026@gmail.com',
+    ),
+    (
+      icon: Icons.info_outline_rounded,
+      label: 'About Badacoin.store',
+      url: 'https://coinapi.bestagencyindia.com/about',
+    ),
   ];
 
   @override
@@ -821,7 +845,32 @@ class _LinksCard extends StatelessWidget {
           return Column(
             children: [
               GestureDetector(
-                onTap: () {},
+                onTap: () {
+                  if (item.label == 'Terms & Conditions') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const TermsAndConditionsPage(),
+                      ),
+                    );
+                  } else if (item.label == 'Privacy Policy') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyPage(),
+                      ),
+                    );
+                  } else if (item.label == 'Additional Legal Policies') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AdditionalLegalPoliciesPage(),
+                      ),
+                    );
+                  } else {
+                    _openUrl(item.url);
+                  }
+                },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -958,6 +1007,72 @@ class _LogoutButton extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFFF3D3D),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeleteAccountButton extends StatelessWidget {
+  const _DeleteAccountButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Delete Account'),
+            content: const Text(
+              'You will be redirected to the account deletion page. Do you want to continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Continue',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmed != true) return;
+
+        try {
+          await StoreApiService.openDeleteAccountPage();
+        } catch (e) {
+          if (!context.mounted) return;
+
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
+        }
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.red.withOpacity(.25)),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.delete_forever, color: Colors.red),
+            SizedBox(width: 10),
+            Text(
+              'Delete Account',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
             ),
           ],
         ),

@@ -4,10 +4,6 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:premium_m_app/services/store_api_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PaymentsWalletScreen — Wallet + Subscription Plans + Add-ons
-// ─────────────────────────────────────────────────────────────────────────────
-
 class PaymentsWalletScreen extends StatefulWidget {
   const PaymentsWalletScreen({super.key});
 
@@ -26,13 +22,11 @@ class _PaymentsWalletScreenState extends State<PaymentsWalletScreen> {
 
   StoreModel? _store;
 
-  // Which plan_id is currently being purchased (shows loading on that button)
   int? _purchasingPlanId;
 
   // ── Razorpay ───────────────────────────────────────────────────────────────
   late Razorpay _razorpay;
 
-  // Cached pending order — needed after payment success callback
   RazorpayOrderModel? _pendingOrder;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────

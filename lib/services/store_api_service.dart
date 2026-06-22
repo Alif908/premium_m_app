@@ -8,13 +8,15 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:premium_m_app/models/store_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ─────────────────────────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────────────────────────
 
-// const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
-const String _baseUrl = 'http://192.168.1.5:3030/api';
+const String _baseUrl = 'https://coinapi.bestagencyindia.com/api';
+// const String _baseUrl = 'http://192.168.1.5:3030/api';
+const String _uploadsBaseUrl = 'https://coinapi.bestagencyindia.com/uploads';
 const String _tokenKey = 'store_token';
 
 // ─────────────────────────────────────────────────────────────
@@ -36,6 +38,16 @@ class ApiException implements Exception {
 // ─────────────────────────────────────────────────────────────
 
 class StoreApiService {
+  // ════════════════════════════════════════════════════════════
+  // MEDIA / BANNER URL HELPER
+  // ════════════════════════════════════════════════════════════
+
+ 
+  static String? resolveBannerUrl(String? banner) {
+    if (banner == null || banner.isEmpty) return null;
+    return banner.startsWith('http') ? banner : '$_uploadsBaseUrl/$banner';
+  }
+
   // ── Token helpers ──────────────────────────────────────────
 
   static Future<void> _saveToken(String token) async {
@@ -76,10 +88,20 @@ class StoreApiService {
   }
 
   static Future<void> logout() async {
-    dev.log('🚪 [Auth] logout() — removing token', name: 'StoreApiService');
+    dev.log('🚪 [Auth] logout() called', name: 'StoreApiService');
+
     final prefs = await SharedPreferences.getInstance();
+
+    final token = prefs.getString(_tokenKey);
+
+    dev.log(
+      'Current token: ${token != null ? "FOUND" : "NULL"}',
+      name: 'StoreApiService',
+    );
+
     await prefs.remove(_tokenKey);
-    dev.log('✅ [Auth] Token removed', name: 'StoreApiService');
+
+    dev.log('✅ Token removed successfully', name: 'StoreApiService');
   }
 
   static Future<bool> isLoggedIn() async {
@@ -183,15 +205,36 @@ class StoreApiService {
 
     final decoded = jsonDecode(response.body);
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final msg = decoded is Map
-          ? decoded['message'] ?? 'Something went wrong'
-          : 'Something went wrong';
+    if (response.statusCode == 401) {
+      dev.log('🚨 [AUTH EXPIRED]', name: 'StoreApiService');
+
+      dev.log('Endpoint : $endpoint', name: 'StoreApiService');
+      dev.log('Status   : ${response.statusCode}', name: 'StoreApiService');
+      dev.log('Response : ${response.body}', name: 'StoreApiService');
+
+      dev.log('🗑️ Removing stored token...', name: 'StoreApiService');
+
+      await logout();
+
       dev.log(
-        '🔴 [API Error] [$method] $endpoint → [${response.statusCode}] $msg',
+        '✅ Token removed. Redirect user to Login.',
         name: 'StoreApiService',
       );
-      throw ApiException(statusCode: response.statusCode, message: msg);
+
+      throw ApiException(
+        statusCode: 401,
+        message: 'Session expired. Please login again.',
+      );
+    }
+
+    // Handle all API errors (400, 404, 409, 422, 500 etc.)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        statusCode: response.statusCode,
+        message: decoded is Map<String, dynamic>
+            ? (decoded['message']?.toString() ?? 'Something went wrong')
+            : 'Something went wrong',
+      );
     }
 
     return decoded;
@@ -828,12 +871,6 @@ class StoreApiService {
   // ────────────────────────────────────────────────────────────
   // STEP 1 — CREATE POPUP PURCHASE ORDER
   // POST /api/store/pop-up   (multipart)
-  //
-  // Backend ഇതു return ചെയ്യും:
-  // { order, addon, total_price, popup_data: { title, banner } }
-  //
-  // NOTE: Popup is fixed 1-day, no `days` field needed.
-  //       Backend checks city exclusivity before creating order.
   // ────────────────────────────────────────────────────────────
 
   static Future<RazorpayPopupOrderModel> purchasePopup({
@@ -877,12 +914,6 @@ class StoreApiService {
   // ────────────────────────────────────────────────────────────
   // STEP 2 — VERIFY POPUP PURCHASE
   // POST /api/store/pop-up/verify-payment   (JSON)
-  //
-  // Body: razorpay_order_id, razorpay_payment_id, razorpay_signature,
-  //       title, banner (filename from step 1)
-  // Returns: { message, popup }
-  //
-  // NOTE: Backend re-checks city exclusivity here too (race-condition safe).
   // ────────────────────────────────────────────────────────────
 
   static Future<PopupModel> verifyPopupPurchase({
@@ -931,6 +962,78 @@ class StoreApiService {
     dev.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', name: 'StoreApiService');
 
     return popup;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // GET POPUPS
+  // ────────────────────────────────────────────────────────────
+
+  /// GET /api/store/pop-up-list
+  static Future<List<PopupModel>> getPopups() async {
+    dev.log('📋 [getPopups] Fetching popups...', name: 'StoreApiService');
+    final data = await _request(
+      method: 'GET',
+      endpoint: '/store/pop-up-list',
+      requiresAuth: true,
+    );
+    dev.log('📦 [getPopups] raw response: $data', name: 'StoreApiService');
+    final popups = (data as List)
+        .map((p) => PopupModel.fromJson(p as Map<String, dynamic>))
+        .toList();
+    dev.log('✅ [getPopups] count: ${popups.length}', name: 'StoreApiService');
+    return popups;
+  }
+
+  /// GET /api/store/pop-up/:id
+  static Future<PopupModel> getPopupById(int id) async {
+    dev.log('🔍 [getPopupById] id: $id', name: 'StoreApiService');
+    final data = await _request(
+      method: 'GET',
+      endpoint: '/store/pop-up/$id',
+      requiresAuth: true,
+    );
+    dev.log('📦 [getPopupById] raw response: $data', name: 'StoreApiService');
+    final popup = PopupModel.fromJson(data as Map<String, dynamic>);
+    dev.log('✅ [getPopupById] title: ${popup.title}', name: 'StoreApiService');
+    return popup;
+  }
+
+  /// PUT /api/store/pop-up/:id
+  static Future<PopupModel> updatePopup({
+    required int id,
+    String? title,
+    bool? isActive,
+    File? bannerImage,
+  }) async {
+    dev.log(
+      '✏️ [updatePopup] id: $id | title: $title | isActive: $isActive',
+      name: 'StoreApiService',
+    );
+    final fields = <String, String>{
+      if (title != null) 'title': title,
+      if (isActive != null) 'is_active': isActive.toString(),
+    };
+    final data = await _multipartRequest(
+      method: 'PUT',
+      endpoint: '/store/pop-up/$id',
+      fields: fields,
+      imageFile: bannerImage,
+    );
+    dev.log('📦 [updatePopup] raw response: $data', name: 'StoreApiService');
+    final popup = PopupModel.fromJson(data['popup'] as Map<String, dynamic>);
+    dev.log('✅ [updatePopup] popupId: ${popup.id}', name: 'StoreApiService');
+    return popup;
+  }
+
+  /// DELETE /api/store/pop-up/:id
+  static Future<void> deletePopup(int id) async {
+    dev.log('🗑️ [deletePopup] id: $id', name: 'StoreApiService');
+    await _request(
+      method: 'DELETE',
+      endpoint: '/store/pop-up/$id',
+      requiresAuth: true,
+    );
+    dev.log('✅ [deletePopup] Deleted popup id: $id', name: 'StoreApiService');
   }
 
   // ────────────────────────────────────────────────────────────
@@ -1087,6 +1190,18 @@ class StoreApiService {
     final cities = List<String>.from(decoded['cities'] ?? []);
     dev.log('✅ [getCities] count: ${cities.length}', name: 'StoreApiService');
     return cities;
+  }
+
+  //delete account
+
+  static Future<void> openDeleteAccountPage() async {
+    final Uri url = Uri.parse(
+      'https://coinapi.bestagencyindia.com/delete-store.html',
+    );
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('Could not launch $url');
+    }
   }
 
   // ════════════════════════════════════════════════════════════
