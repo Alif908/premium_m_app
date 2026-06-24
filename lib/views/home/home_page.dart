@@ -101,11 +101,20 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _refreshAll() async {
-    await Future.wait([_loadStore(), _loadOffers()]);
+    try {
+      await _loadStore();
+    } catch (_) {}
+
+    try {
+      await _loadOffers();
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
+    debugPrint("🏠 HOME PAGE BUILD");
+    debugPrint("Offers Length: ${_offers.length}");
+    debugPrint("Offers Loading: $_offersLoading");
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: Color(0xFFFFF0F3),
@@ -178,6 +187,7 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
                   const SizedBox(height: 12),
+
                   _OffersPreviewRow(
                     offers: _offers,
                     isLoading: _offersLoading,
@@ -377,9 +387,8 @@ class _ActiveSubscriptionBadge extends StatelessWidget {
     final isActive = store?.isSubscriptionActive ?? false;
     final label = isActive ? 'Active Subscription' : 'No Active Subscription';
     final color = isActive ? const Color(0xFF34C759) : const Color(0xFFFF9500);
-    final icon = isActive
-        ? Icons.check_circle_rounded
-        : Icons.warning_amber_rounded;
+    final icon =
+        isActive ? Icons.check_circle_rounded : Icons.warning_amber_rounded;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -543,10 +552,10 @@ class _QrIcon extends StatelessWidget {
   const _QrIcon();
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 52,
-    height: 52,
-    child: CustomPaint(painter: _QrPainter()),
-  );
+        width: 52,
+        height: 52,
+        child: CustomPaint(painter: _QrPainter()),
+      );
 }
 
 class _QrPainter extends CustomPainter {
@@ -638,9 +647,6 @@ class _QrPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// ── Offers Preview Row (NEW) ────────────────────────────────────────────
-// Mirrors the look of the user app's home offers row: horizontal cards
-// with banner image, gradient fallback, title + status overlay.
 class _OffersPreviewRow extends StatelessWidget {
   final List<OfferModel> offers;
   final bool isLoading;
@@ -770,8 +776,8 @@ class _OffersPreviewRow extends StatelessWidget {
                           color: isExpired
                               ? Colors.grey.withOpacity(0.85)
                               : (isActive
-                                    ? const Color(0xFF34C759).withOpacity(0.9)
-                                    : Colors.grey.withOpacity(0.85)),
+                                  ? const Color(0xFF34C759).withOpacity(0.9)
+                                  : Colors.grey.withOpacity(0.85)),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(

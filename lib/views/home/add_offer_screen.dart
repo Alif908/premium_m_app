@@ -56,13 +56,41 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   void _onPaymentSuccess(PaymentSuccessResponse response) async {
     if (_pendingOrder == null) return;
 
+    // ── Validation ─────────────────────────────
+    if (response.orderId == null || response.orderId!.trim().isEmpty) {
+      _showSnack(
+        'Payment verification failed. Missing order id.',
+        isError: true,
+      );
+      _pendingOrder = null;
+      return;
+    }
+
+    if (response.paymentId == null || response.paymentId!.trim().isEmpty) {
+      _showSnack(
+        'Payment verification failed. Missing payment id.',
+        isError: true,
+      );
+      _pendingOrder = null;
+      return;
+    }
+
+    if (response.signature == null || response.signature!.trim().isEmpty) {
+      _showSnack(
+        'Payment verification failed. Missing signature.',
+        isError: true,
+      );
+      _pendingOrder = null;
+      return;
+    }
+
     setState(() => _submitting = true);
 
     try {
       final offer = await StoreApiService.verifyOfferPurchase(
-        razorpayOrderId: response.orderId ?? '',
-        razorpayPaymentId: response.paymentId ?? '',
-        razorpaySignature: response.signature ?? '',
+        razorpayOrderId: response.orderId!,
+        razorpayPaymentId: response.paymentId!,
+        razorpaySignature: response.signature!,
         title: _pendingOrder!.offerTitle,
         description: _pendingOrder!.offerDescription,
         days: _pendingOrder!.days,
@@ -70,16 +98,31 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       );
 
       if (!mounted) return;
+
       _showSnack('Offer "${offer.title}" activated! 🎉');
+
       await Future.delayed(const Duration(milliseconds: 600));
-      if (mounted) Navigator.of(context).pop(true);
+
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
     } on ApiException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
-    } catch (_) {
-      if (mounted)
-        _showSnack('Verification failed. Contact support.', isError: true);
+      if (mounted) {
+        _showSnack(e.message, isError: true);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack(
+          'Verification failed. Contact support.',
+          isError: true,
+        );
+      }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      _pendingOrder = null;
+
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -177,6 +220,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   // ── Preview & Pay ─────────────────────────────────────────────────────────
 
   Future<void> _previewAndPay() async {
+    if (_submitting) return;
+
     final title = _titleController.text.trim();
     final desc = _descController.text.trim();
     final daysText = _daysController.text.trim();
@@ -186,20 +231,26 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       _showSnack('Please enter offer title', isError: true);
       return;
     }
+
     if (daysText.isEmpty) {
       _showSnack('Please enter number of days', isError: true);
       return;
     }
+
     final days = int.tryParse(daysText);
+
     if (days == null || days <= 0) {
-      _showSnack('Days must be a valid number greater than 0', isError: true);
+      _showSnack(
+        'Days must be a valid number greater than 0',
+        isError: true,
+      );
       return;
     }
 
     setState(() => _submitting = true);
 
     try {
-      // Step 1: Create order
+      // Step 1: Create Razorpay Order
       final order = await StoreApiService.purchaseOffer(
         title: title,
         description: desc,
@@ -209,15 +260,19 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
       _pendingOrder = order;
 
-      // Show price confirmation before opening Razorpay
+      // Step 2: Show Confirmation Dialog
       final confirmed = await _showPriceConfirmDialog(order);
+
       if (!mounted || confirmed != true) {
-        setState(() => _submitting = false);
         _pendingOrder = null;
+
+        if (mounted) {
+          setState(() => _submitting = false);
+        }
         return;
       }
 
-      // Step 2: Open Razorpay
+      // Step 3: Open Razorpay
       final options = {
         'key': 'rzp_test_RpQCDZttUbr3uO',
         'order_id': order.orderId,
@@ -225,18 +280,46 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         'currency': order.currency,
         'name': 'Offer Activation',
         'description': '${order.days} day offer: ${order.offerTitle}',
-        'prefill': {'contact': '', 'email': ''},
-        'theme': {'color': '#EC4899'},
+        'prefill': {
+          'contact': '',
+          'email': '',
+        },
+        'theme': {
+          'color': '#EC4899',
+        },
       };
 
-      _razorpay.open(options);
+      try {
+        _razorpay.open(options);
+      } catch (e) {
+        _pendingOrder = null;
+
+        if (mounted) {
+          setState(() => _submitting = false);
+        }
+
+        _showSnack(
+          'Unable to open payment gateway.',
+          isError: true,
+        );
+      }
     } on ApiException catch (e) {
-      if (mounted) _showSnack(e.message, isError: true);
-      setState(() => _submitting = false);
-    } catch (_) {
-      if (mounted)
-        _showSnack('Something went wrong. Please try again.', isError: true);
-      setState(() => _submitting = false);
+      _pendingOrder = null;
+
+      if (mounted) {
+        _showSnack(e.message, isError: true);
+        setState(() => _submitting = false);
+      }
+    } catch (e) {
+      _pendingOrder = null;
+
+      if (mounted) {
+        _showSnack(
+          'Something went wrong. Please try again.',
+          isError: true,
+        );
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -337,9 +420,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: isError
-            ? const Color(0xFFEF4444)
-            : const Color(0xFF22C55E),
+        backgroundColor:
+            isError ? const Color(0xFFEF4444) : const Color(0xFF22C55E),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -453,19 +535,22 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                                       right: 8,
                                                       child: Container(
                                                         padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 10,
-                                                              vertical: 6,
-                                                            ),
-                                                        decoration: BoxDecoration(
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                          horizontal: 10,
+                                                          vertical: 6,
+                                                        ),
+                                                        decoration:
+                                                            BoxDecoration(
                                                           color: Colors.black
                                                               .withOpacity(
-                                                                0.55,
-                                                              ),
+                                                            0.55,
+                                                          ),
                                                           borderRadius:
-                                                              BorderRadius.circular(
-                                                                20,
-                                                              ),
+                                                              BorderRadius
+                                                                  .circular(
+                                                            20,
+                                                          ),
                                                         ),
                                                         child: const Row(
                                                           mainAxisSize:
@@ -506,10 +591,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                                                     height: 52,
                                                     decoration:
                                                         const BoxDecoration(
-                                                          color: Colors.white,
-                                                          shape:
-                                                              BoxShape.circle,
-                                                        ),
+                                                      color: Colors.white,
+                                                      shape: BoxShape.circle,
+                                                    ),
                                                     child: const Icon(
                                                       Icons.upload_outlined,
                                                       color: Color(0xFFEC4899),

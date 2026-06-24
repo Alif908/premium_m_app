@@ -124,13 +124,13 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final imageUrl =
       notification.android?.imageUrl ?? notification.apple?.imageUrl;
 
-  // await _showLocalNotification(
-  //   id: notification.hashCode,
-  //   title: notification.title,
-  //   body: notification.body,
-  //   imageUrl: imageUrl,
-  //   payload: message.data['type'],
-  // );
+  await _showLocalNotification(
+    id: notification.hashCode,
+    title: notification.title,
+    body: notification.body,
+    imageUrl: imageUrl,
+    payload: message.data['type'],
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -216,34 +216,35 @@ Future<void> main() async {
     });
 
     // ── Foreground notification with image ──────────────────
-    // FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-    //   debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    //   debugPrint('📩 [FCM] Foreground message');
-    //   debugPrint('   Title             : ${message.notification?.title}');
-    //   debugPrint('   Body              : ${message.notification?.body}');
-    //   debugPrint(
-    //     '   android?.imageUrl : ${message.notification?.android?.imageUrl}',
-    //   );
-    //   debugPrint(
-    //     '   apple?.imageUrl   : ${message.notification?.apple?.imageUrl}',
-    //   );
-    //   debugPrint('   data              : ${message.data}');
-    //   debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      debugPrint('📩 [FCM] Foreground message');
+      debugPrint(
+          '   Title ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------            : ${message.notification?.title}');
+      debugPrint('   Body              : ${message.notification?.body}');
+      debugPrint(
+        '   android?.imageUrl : ${message.notification?.android?.imageUrl}',
+      );
+      debugPrint(
+        '   apple?.imageUrl   : ${message.notification?.apple?.imageUrl}',
+      );
+      debugPrint('   data              : ${message.data}');
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    //   final notification = message.notification;
-    //   if (notification == null) return;
+      final notification = message.notification;
+      if (notification == null) return;
 
-    //   final imageUrl =
-    //       notification.android?.imageUrl ?? notification.apple?.imageUrl;
+      final imageUrl =
+          notification.android?.imageUrl ?? notification.apple?.imageUrl;
 
-    //   await _showLocalNotification(
-    //     id: message.hashCode,
-    //     title: notification.title,
-    //     body: notification.body,
-    //     imageUrl: imageUrl,
-    //     payload: message.data['type'],
-    //   );
-    // });
+      await _showLocalNotification(
+        id: message.hashCode,
+        title: notification.title,
+        body: notification.body,
+        imageUrl: imageUrl,
+        payload: message.data['type'],
+      );
+    });
 
     FirebaseMessaging.onMessageOpenedApp.listen(handleNotificationNavigation);
 
